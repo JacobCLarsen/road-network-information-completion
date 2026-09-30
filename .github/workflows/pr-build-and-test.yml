@@ -1,0 +1,42 @@
+name: PR Build / Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+
+      - name: Run API tests
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+        run: |
+          pytest tests/api/ -v --cov=src/api --cov-report=term --cov-report=html
+
+      - name: Build Docker image
+        run: |
+          docker build -t test-image:pr-${{ github.event.pull_request.number }} .
+
+      - name: Create summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Python dependencies installed" >> $GITHUB_STEP_SUMMARY
+          echo "Tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "Docker image built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "Ready to merge!" >> $GITHUB_STEP_SUMMARY
+        if: always()

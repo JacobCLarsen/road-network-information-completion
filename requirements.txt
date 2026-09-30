@@ -1,0 +1,15 @@
+# API requirements
+FastAPI
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+pydantic
+pydantic-settings
+python-dotenv
+
+# Tests requirements
+pytest
+pytest-cov
+pytest_asyncio
+httpx
+aiosqlite

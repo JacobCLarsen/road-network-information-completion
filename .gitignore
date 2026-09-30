@@ -1,0 +1,36 @@
+# Data (datasets are not committed)
+data/
+
+# Training outputs: model checkpoints, results and logs
+artifacts/
+*.pth
+
+# python
+__pycache__
+
+# env
+venv
+.venv
+env
+myvenv
+myenv
+
+# Coverage files
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# vscode
+.vscode
+
+# .idea
+.idea
+# env
+.env
+
+# Kube config
+kubeconfig.yaml
+
+# Kubernetes secrets (contains passwords)
+k8s/secret.yaml

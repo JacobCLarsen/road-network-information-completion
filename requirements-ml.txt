@@ -1,0 +1,5 @@
+# ML requirements (training only, not installed in the API image)
+-r requirements.txt
+pandas
+torch
+torch_geometric

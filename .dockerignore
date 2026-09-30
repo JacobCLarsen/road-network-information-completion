@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+tests/
+*.md
+
+# Data, training outputs and ML code (the image only serves the API)
+data/
+artifacts/
+src/ml/
+requirements-ml.txt
+
+# Kubernetes
+k8s/
+kubeconfig.yaml
+
+# Environment
+.env
+.env.*
