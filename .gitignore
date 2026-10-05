@@ -1,8 +1,8 @@
 # Data (datasets are not committed)
-data/
+/data/
 
 # Training outputs: model checkpoints, results and logs
-artifacts/
+/artifacts/
 *.pth
 
 # python
