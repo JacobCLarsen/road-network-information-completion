@@ -80,6 +80,13 @@ def compute_features(segment):
     return [math.log(length), curvature, one_way]
 
 
+def add_to_junction(segments_at_junction, junction, segment_index):
+    """Adds a segment to the list of segments at a junction, creating the list if it does not exist yet."""
+    if junction not in segments_at_junction:
+        segments_at_junction[junction] = []
+    segments_at_junction[junction].append(segment_index)
+
+
 class RoadGraphBuilder:
     def __init__(self, segments, classes=ROAD_CLASSES):
         """
@@ -181,9 +188,3 @@ class RoadGraphBuilder:
             'edge_to_segment': self.edge_to_segment,
         }
 
-
-def add_to_junction(segments_at_junction, junction, segment_index):
-    """Adds a segment to the list of segments at a junction, creating the list if it does not exist yet."""
-    if junction not in segments_at_junction:
-        segments_at_junction[junction] = []
-    segments_at_junction[junction].append(segment_index)
