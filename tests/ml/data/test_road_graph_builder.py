@@ -1,93 +1,112 @@
+import math
 import pytest
 import torch
-import pandas as pd
-from unittest.mock import MagicMock
-from src.ml.data.road_graph_builder import RoadGraphBuilder
+from src.ml.data.road_graph_builder import RoadGraphBuilder, Segment, ROAD_CLASSES, haversine
+
+A, B, C = (10.000, 55.000), (10.001, 55.000), (10.002, 55.000)
+BEND, D, E = (10.001, 54.999), (10.002, 54.999), (10.002, 54.998)
 
 
 @pytest.fixture
-def mock_loader():
-    """Provides a mocked FileLoader with controlled return values."""
-    loader = MagicMock()
+def segments():
+    """
+    A small network of four segments between junctions 1, 2, 3, 5, 6:
 
-    # 1. Mock Adjacency: Two edges that connect at vertex 2
-    # Edge 10: 1 -> 2 | Edge 20: 2 -> 3
-    adj_df = pd.DataFrame({
-        "edge_id": [10, 20],
-        "vertex_start_id": [1, 2],
-        "vertex_end_id": [2, 3]
-    })
-
-    # 2. Mock Metadata: Way 999 contains vertex 1 and 2 (matches Edge 10)
-    # way index must be int as per FileLoader.get_meta_data()
-    meta_df = pd.DataFrame({
-        "nodes": [["1", "2"], ["2", "3"]],
-        "road_type": ["motorway", "residential"],
-        "oneway": [True, False]
-    }, index=[999, 888])
-
-    loader.get_adjacency.return_value = adj_df
-    loader.get_meta_data.return_value = meta_df
-    return loader
+        1 ---- 2 ---- 3        segments 0 and 1 (primary, oneway)
+               |
+               + -- 5          segment 2 (residential, two-way), bends on the way to 5
+                    |
+                    6          segment 3 (no highway tag)
+    """
+    return [
+        Segment(edge_ids=[10], u=1, v=2, points=[A, B], highway="primary", oneway="True"),
+        Segment(edge_ids=[11], u=2, v=3, points=[B, C], highway="primary", oneway="True"),
+        Segment(edge_ids=[20, 21], u=2, v=5, points=[B, BEND, D], highway="residential", oneway="False"),
+        Segment(edge_ids=[30], u=5, v=6, points=[D, E], highway=None, oneway=None),
+    ]
 
 
-def test_create_edge_as_node_map(mock_loader):
-    """Verify physical IDs are mapped to sequential 0-N indices."""
-    global_ids = [20, 10]  # Unordered input
-    builder = RoadGraphBuilder(mock_loader, global_ids)
+def test_keys_and_geometry(segments):
+    builder = RoadGraphBuilder(segments)
 
-    # Mapping should be sorted: 10 -> 0, 20 -> 1
-    assert builder.edge_as_node_map[10] == 0
-    assert builder.edge_as_node_map[20] == 1
-    assert torch.equal(builder.edge_ids, torch.tensor([10, 20], dtype=torch.int))
+    assert builder.seg_key == [(10, 1, 2), (11, 2, 3), (20, 2, 5), (30, 5, 6)]
+    assert builder.geometry[2] == [B, BEND, D]
 
 
-def test_build_node_features_encoding(mock_loader):
-    """Test that road types and oneway status are correctly encoded into tensors."""
-    global_ids = [10, 20]
-    builder = RoadGraphBuilder(mock_loader, global_ids)
-
-    # Road types index 0 is 'motorway'.
-    # Edge 10 is motorway + oneway.
-    # Expected: [1, 0, 0, ..., 1] (oneway is the last index)
-    features = builder.x
-    assert features.shape == (2, 22)  # 21 road types + 1 oneway
-
-    # Edge 10 (Node 0)
-    assert features[0, 0] == 1.0  # motorway bit
-    assert features[0, -1] == 1.0  # oneway bit
-
-    # Edge 20 (Node 1) is 'residential' (index 6 in road_types list)
-    assert features[1, 6] == 1.0
-    assert features[1, -1] == 0.0  # not oneway
+def test_both_directions_map_to_the_same_segment(segments):
+    builder = RoadGraphBuilder(segments)
+    assert builder.edge_to_segment == {10: 0, 11: 1, 20: 2, 21: 2, 30: 3}
 
 
-def test_line_graph_edge_index(mock_loader):
-    """Verify that Edge 10 -> Edge 20 connection is captured."""
-    global_ids = [10, 20]
-    builder = RoadGraphBuilder(mock_loader, global_ids)
+def test_labels_and_mask(segments):
+    builder = RoadGraphBuilder(segments)
 
-    # Edge 10 (Node 0) ends at Vertex 2.
-    # Edge 20 (Node 1) starts at Vertex 2.
-    # Connection: 0 -> 1
-    expected_edge_index = torch.tensor([[0], [1]], dtype=torch.long)
-    assert torch.equal(builder.edge_index, expected_edge_index)
+    primary, residential = ROAD_CLASSES.index("primary"), ROAD_CLASSES.index("residential")
+    assert builder.y.tolist() == [primary, primary, residential, -1]
+    assert builder.mask.tolist() == [True, True, True, False]
 
 
-def test_missing_metadata_defaults_to_zeros(mock_loader):
-    """Verify that edges with no matching metadata get zeroed features."""
-    # Provide an edge ID (30) that has no vertices in the metadata nodes list
-    global_ids = [30]
-    builder = RoadGraphBuilder(mock_loader, global_ids)
-
-    # Should result in a vector of all zeros
-    assert torch.all(builder.x == 0)
+def test_multiple_road_types_are_unlabelled():
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="['residential', 'tertiary']")
+    builder = RoadGraphBuilder([seg])
+    assert builder.y.tolist() == [-1]
+    assert builder.mask.tolist() == [False]
 
 
-def test_get_static_components_keys(mock_loader):
-    """Ensure the returned dictionary has the expected keys for the training pipeline."""
-    builder = RoadGraphBuilder(mock_loader, [10, 20])
-    components = builder.get_static_components()
+def test_features(segments):
+    builder = RoadGraphBuilder(segments)
+    assert builder.x.shape == (4, 4)
 
-    expected_keys = {'x', 'edge_index', 'edge_ids', 'edge_as_node_map'}
-    assert set(components.keys()) == expected_keys
+    # Straight segment: no curvature, oneway
+    straight = builder.x[0]
+    assert straight[0].item() == pytest.approx(math.log(haversine(A, B)), rel=1e-5)
+    assert straight[1].item() == pytest.approx(0.0, abs=1e-5)
+    assert straight[2].item() == 1.0
+
+    # Bent segment B -> BEND -> D: curvature is 1 - straight / length
+    length = haversine(B, BEND) + haversine(BEND, D)
+    bent = builder.x[2]
+    assert bent[0].item() == pytest.approx(math.log(length), rel=1e-5)
+    assert bent[1].item() == pytest.approx(1 - haversine(B, D) / length, rel=1e-4)
+    assert bent[2].item() == 0.0
+
+
+def test_line_graph_edges(segments):
+    builder = RoadGraphBuilder(segments)
+
+    # Segments 0, 1, 2 meet at junction 2; segments 2 and 3 meet at junction 5
+    edges = set(map(tuple, builder.edge_index.t().tolist()))
+    assert edges == {(0, 1), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1), (2, 3), (3, 2)}
+
+
+def test_connection_count_feature(segments):
+    builder = RoadGraphBuilder(segments)
+    assert builder.x[:, 3].tolist() == [2, 2, 3, 1]
+
+
+def test_parallel_segments_are_connected_once():
+    segs = [
+        Segment(edge_ids=[1], u=1, v=2, points=[A, B]),
+        Segment(edge_ids=[2], u=1, v=2, points=[A, BEND, B]),
+    ]
+    builder = RoadGraphBuilder(segs)
+    assert builder.edge_index.tolist() == [[0, 1], [1, 0]]
+
+
+def test_loop_segment_is_not_connected_to_itself():
+    loop = Segment(edge_ids=[1], u=1, v=1, points=[A, B, BEND, A], highway="service")
+    builder = RoadGraphBuilder([loop])
+
+    assert builder.edge_index.shape == (2, 0)
+    assert builder.x[0, 1].item() == pytest.approx(1.0)
+    assert builder.x[0, 3] == 0
+
+
+def test_zero_length_segment_has_finite_features():
+    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, A], highway="road")])
+    assert torch.isfinite(builder.x).all()
+
+
+def test_get_static_components_keys(segments):
+    components = RoadGraphBuilder(segments).get_static_components()
+    assert set(components.keys()) == {'x', 'y', 'mask', 'edge_index', 'seg_key', 'geometry', 'edge_to_segment'}
