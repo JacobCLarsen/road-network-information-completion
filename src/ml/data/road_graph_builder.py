@@ -72,6 +72,9 @@ def compute_features(segment):
     straight_distance = haversine(first_point, last_point)
     curvature = 1 - straight_distance / length
 
+    # Rounding errors can push curvature slightly outside [0, 1] (e.g. -2e-16 for a straight road), so curvature is clamped.
+    curvature = min(max(curvature, 0.0), 1.0)
+
     # One-way: 1 if the road is one-way, otherwise 0
     one_way = 0
     if str(segment.oneway).lower() in ONEWAY_VALUES:
@@ -124,6 +127,8 @@ class RoadGraphBuilder:
             self.seg_key.append((segment.edge_ids[0], segment.u, segment.v))
             self.geometry.append(segment.points)
             for edge_id in segment.edge_ids:
+                # Check if the edge ID already exists in the list.
+                assert edge_id not in self.edge_to_segment, f"Edge ID {edge_id} is used by more than one segment"
                 self.edge_to_segment[edge_id] = i
 
             # If the segment has a valid label, use it, otherwise it is not used in training
