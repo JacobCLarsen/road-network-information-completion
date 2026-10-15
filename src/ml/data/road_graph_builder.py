@@ -1,141 +1,190 @@
 # src/ml/data/road_graph_builder.py
 
+import math
 import torch
-import pandas as pd
-from typing import Dict, Tuple, List
-from collections import defaultdict
-from src.ml.data.file_loader import FileLoader
+
+# The road types we want to predict. A segment's label is the position of its road type in this list.
+ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
+                "residential", "motorway_link", "trunk_link", "primary_link", "secondary_link",
+                "tertiary_link", "living_street", "service", "pedestrian", "track", "bus_guideway",
+                "escape", "raceway", "road", "busway"]
+
+# Values of the oneway tag that mean the road is one-way
+ONEWAY_VALUES = ["yes", "true", "1", "-1"]
+
+EARTH_RADIUS_M = 6371000.0
+
+# Smallest length a segment can have (one millimeter). Without it, a segment of length 0 would give
+# log(0) and a division by zero when computing the features.
+MIN_LENGTH_M = 0.001
+
+
+class Segment:
+    """
+    A road between two junctions.
+
+    edge_ids: The IDs of the edge records in the map that this segment comes from. A one-way road has
+              one ID, and a two-way road has two (one for each direction). The traffic data uses these IDs.
+    u, v:     The IDs of the start and end junction.
+    points:   The shape of the road as a list of (longitude, latitude) points, from u to v.
+    highway:  The road type, e.g. "residential".
+    oneway:   The oneway tag, e.g. "True" or "False".
+    """
+
+    def __init__(self, edge_ids, u, v, points, highway=None, oneway=None):
+        self.edge_ids = edge_ids
+        self.u = u
+        self.v = v
+        self.points = points
+        self.highway = highway
+        self.oneway = oneway
+
+
+def haversine(point_a, point_b):
+    """
+    Returns the distance in meters between two (longitude, latitude) points, measured along the surface
+    of the Earth. Calculated using the haversine formula.
+    """
+    lon1 = math.radians(point_a[0])
+    lat1 = math.radians(point_a[1])
+    lon2 = math.radians(point_b[0])
+    lat2 = math.radians(point_b[1])
+
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
+
+
+def compute_features(segment):
+    """
+    Returns the features of a segment: [log(length), curvature, one_way].
+    """
+    # Length along the road: add up the distances between consecutive points
+    length = 0.0
+    for k in range(len(segment.points) - 1):
+        length = length + haversine(segment.points[k], segment.points[k + 1])
+
+    if length < MIN_LENGTH_M:
+        length = MIN_LENGTH_M
+
+    # Curvature: 0 for a straight road, close to 1 for a road that winds a lot (exactly 1 for a loop)
+    first_point = segment.points[0]
+    last_point = segment.points[len(segment.points) - 1]
+    straight_distance = haversine(first_point, last_point)
+    curvature = 1 - straight_distance / length
+
+    # One-way: 1 if the road is one-way, otherwise 0
+    one_way = 0
+    if str(segment.oneway).lower() in ONEWAY_VALUES:
+        one_way = 1
+
+    return [math.log(length), curvature, one_way]
+
+
+def add_to_junction(segments_at_junction, junction, segment_index):
+    """Adds a segment to the list of segments at a junction, creating the list if it does not exist yet."""
+    if junction not in segments_at_junction:
+        segments_at_junction[junction] = []
+    segments_at_junction[junction].append(segment_index)
 
 
 class RoadGraphBuilder:
-    def __init__(self, loader: FileLoader, global_edge_ids: List[int]):
+    def __init__(self, segments, classes=ROAD_CLASSES):
         """
-        Builds the static components of the line graph (nodes=edges) and their features.
+        Builds the line graph of the road network: every road segment becomes a vertex, and two segments
+        are connected by an edge if they meet at a junction.
 
-        Args:
-            loader: A FileLoader instance providing access to adjacency and metadata.
-            global_edge_ids: A sorted list of all unique edge IDs defining the graph nodes.
+        segments: List of Segment objects, already split at junctions.
+        classes:  List of road types used as labels.
+
+        After building, the results are stored in:
+            x:               Features of each segment (tensor, one row per segment)
+            y:               Label of each segment, or -1 if its road type is not in classes
+            mask:            True if the segment has a label, otherwise False
+            edge_index:      The connected pairs of segments (tensor with 2 rows)
+            seg_key:         (edge ID, start junction, end junction) for each segment
+            geometry:        The list of points of each segment
+            edge_to_segment: Dictionary from edge ID in the map to segment index
         """
-        self._adj_data = loader.get_adjacency()  # Edge connections (Original Graph Edges)
-        self._meta_data = loader.get_meta_data()  # OSM road features (Way IDs as index)
-        self._global_edge_ids = global_edge_ids
+        num_segments = len(segments)
 
-        # 1. Map physical edge IDs to sequential node IDs (0 to N-1)
-        self.edge_as_node_map, self.edge_ids = self._create_edge_as_node_map()
+        # Step 1: set labels and compute features
+        x = []
+        y = []
+        mask = []
+        self.seg_key = []
+        self.geometry = []
+        self.edge_to_segment = {}
 
-        # 2. Build Static Node Features (x)
-        self.x = self._build_node_features()
+        # For each junction, the list of segments that start or end there
+        segments_at_junction = {}
 
-        # 3. Build Adjacency Matrix (edge_index) for the Line Graph
-        self.edge_index = self._build_line_graph_edge_index()
+        for i in range(num_segments):
+            segment = segments[i]
 
-    def _create_edge_as_node_map(self) -> Tuple[Dict[int, int], torch.Tensor]:
-        """
-        Creates a mapping from the physical road ID (int) to the graph's sequential node ID (0 to N-1).
-        The resulting tensor holds the physical edge IDs, ordered by their new node index.
-        """
-        sorted_edge_ids = sorted(self._global_edge_ids)
-        edge_as_node_map = {edge_id: i for i, edge_id in enumerate(sorted_edge_ids)}
-        node_ids_tensor = torch.tensor(sorted_edge_ids, dtype=torch.int)
+            self.seg_key.append((segment.edge_ids[0], segment.u, segment.v))
+            self.geometry.append(segment.points)
+            for edge_id in segment.edge_ids:
+                self.edge_to_segment[edge_id] = i
 
-        return edge_as_node_map, node_ids_tensor
-
-    def _build_node_features(self) -> torch.Tensor:
-        """
-        Generates the static feature tensor 'x' (N, F_static) for all nodes
-        by mapping OSM metadata to the edges.
-        """
-        road_types = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
-                      "residential", "motorway_link", "trunk_link", "primary_link", "secondary_link",
-                      "tertiary_link", "living_street", "service", "pedestrian", "track", "bus_guideway",
-                      "escape", "raceway", "road", "busway"]
-
-        # Filter adjacency data to only include the global set of edges (nodes)
-        filtered_adj_df = self._adj_data[
-            self._adj_data["edge_id"].isin(self.edge_as_node_map.keys())
-        ]
-
-        # 1. Build lookup (Edge ID -> OSM Way object/tuple)
-        edge_to_way = {}
-        for way in self._meta_data.itertuples():
-            if not hasattr(way, 'nodes'):
-                continue
-            nodes_set = set(way.nodes)
-
-            # Check which edges belong to this way
-            for row in filtered_adj_df.itertuples():
-                start_str = str(row.vertex_start_id)
-                end_str = str(row.vertex_end_id)
-
-                if start_str in nodes_set and end_str in nodes_set:
-                    edge_to_way[row.edge_id] = way
-
-        # 2. Build features in sequential node order (0 to N-1)
-        feature_list = []
-        missing_count = 0
-
-        # Iterate in the correct sequential order
-        for edge_id in sorted(self.edge_as_node_map, key=lambda k: self.edge_as_node_map[k]):
-            if edge_id in edge_to_way:
-                way = edge_to_way[edge_id]
-                oneway = 1 if getattr(way, 'oneway', False) else 0  # Use getattr for safety
-                type_encoded = [1 if getattr(way, 'road_type', None) == rt else 0 for rt in road_types]
-
-                feature_vector = type_encoded + [oneway]
-                feature_list.append(feature_vector)
+            # If the segment has a valid label, use it, otherwise it is not used in training
+            if segment.highway in classes:
+                y.append(classes.index(segment.highway))
+                mask.append(True)
             else:
-                # Default features if no way found (all zeros)
-                feature_list.append([0] * (len(road_types) + 1))
-                missing_count += 1
+                y.append(-1)
+                mask.append(False)
 
-        if missing_count > 0:
-            print(
-                f"RoadGraphBuilder Warning: {missing_count} edges are missing metadata out of {len(self.edge_as_node_map)}")
+            # Add the features
+            x.append(compute_features(segment))
 
-        final_features = torch.tensor(feature_list, dtype=torch.float)
+            # Remember which junctions the segment touches
+            add_to_junction(segments_at_junction, segment.u, i)
+            if segment.v != segment.u:
+                add_to_junction(segments_at_junction, segment.v, i)
 
-        return final_features
+        # Step 2: line graph transformation.
+        # Connect every pair of segments that touch the same junction. A set is used so that two segments
+        # sharing both junctions are only connected once.
+        connections = set()
+        for junction in segments_at_junction:
+            segments_here = segments_at_junction[junction]
+            for a in segments_here:
+                for b in segments_here:
+                    if a != b:
+                        connections.add((a, b))
 
-    def _build_line_graph_edge_index(self) -> torch.Tensor:
-        """
-        Builds line graph connectivity: edge A -> edge B exists if A's end vertex = B's start vertex.
-        """
-        vertex_start_to_edges = defaultdict(list)
-        edge_to_vertex_end = {}
+        # Step 3: add the number of connections (the degree) as a feature
+        degree = [0] * num_segments
+        for (a, b) in connections:
+            degree[a] = degree[a] + 1
 
-        valid_adj_df = self._adj_data[
-            self._adj_data["edge_id"].isin(self.edge_as_node_map.keys())
-        ]
+        for i in range(num_segments):
+            x[i].append(degree[i])
 
-        # 1. Map vertices to edges
-        for _, row in valid_adj_df.iterrows():
-            edge_id = row["edge_id"]
-            vertex_start_to_edges[row["vertex_start_id"]].append(edge_id)
-            edge_to_vertex_end[edge_id] = row["vertex_end_id"]
+        # Convert to tensors for PyTorch
+        self.x = torch.tensor(x, dtype=torch.float).reshape(num_segments, 4)
+        self.y = torch.tensor(y, dtype=torch.long)
+        self.mask = torch.tensor(mask, dtype=torch.bool)
 
-        line_edges = []
-
-        # 2. Find connections (Line Graph Edges)
-        for edge_from, vertex_end in edge_to_vertex_end.items():
-            for edge_to in vertex_start_to_edges.get(vertex_end, []):
-                if edge_from != edge_to:
-                    n1 = self.edge_as_node_map[edge_from]
-                    n2 = self.edge_as_node_map[edge_to]
-                    line_edges.append((n1, n2))
-
-        if not line_edges:
-            return torch.empty((2, 0), dtype=torch.long)
-
-        return torch.tensor(list(zip(*line_edges)), dtype=torch.long)
+        # edge_index has two rows: the first row holds the start of each connection, the second row the end
+        sources = []
+        targets = []
+        for (a, b) in sorted(connections):
+            sources.append(a)
+            targets.append(b)
+        self.edge_index = torch.tensor([sources, targets], dtype=torch.long)
 
     def get_static_components(self):
         """
-        Returns a dictionary of all static graph components ready to be passed
-        to the GraphDatasetBuilder instances.
+        Returns all parts of the graph in a dictionary.
         """
         return {
             'x': self.x,
+            'y': self.y,
+            'mask': self.mask,
             'edge_index': self.edge_index,
-            'edge_ids': self.edge_ids,
-            'edge_as_node_map': self.edge_as_node_map
+            'seg_key': self.seg_key,
+            'geometry': self.geometry,
+            'edge_to_segment': self.edge_to_segment,
         }
+

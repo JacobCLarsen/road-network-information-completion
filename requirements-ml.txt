@@ -3,3 +3,4 @@
 pandas
 torch
 torch_geometric
+pyshp
