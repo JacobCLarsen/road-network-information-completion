@@ -107,6 +107,20 @@ def test_zero_length_segment_has_finite_features():
     assert torch.isfinite(builder.x).all()
 
 
+def test_straight_segment_has_curvature_in_range():
+    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, B, C], highway="road")])
+    assert 0.0 <= builder.x[0, 1].item() <= 1.0
+
+
+def test_duplicate_edge_id_raises():
+    duplicates = [
+        Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="road"),
+        Segment(edge_ids=[1], u=2, v=3, points=[B, C], highway="road"),
+    ]
+    with pytest.raises(AssertionError, match="Edge ID 1"):
+        RoadGraphBuilder(duplicates)
+
+
 def test_get_static_components_keys(segments):
     components = RoadGraphBuilder(segments).get_static_components()
     assert set(components.keys()) == {'x', 'y', 'mask', 'edge_index', 'seg_key', 'geometry', 'edge_to_segment'}
