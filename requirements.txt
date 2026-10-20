@@ -13,5 +13,3 @@ pytest-cov
 pytest_asyncio
 httpx
 aiosqlite
-
-torch

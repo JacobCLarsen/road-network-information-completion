@@ -54,6 +54,9 @@ pip install -r requirements-ml.txt
 
 See [src/ml/README.md](src/ml/README.md).
 
+To compare the candidate models (Random Forest, GBT, Label Propagation, GCN, GraphSAGE, GAT), see
+[experiments/model_comparison/README.md](experiments/model_comparison/README.md).
+
 ## Testing
 
 ```bash
