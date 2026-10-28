@@ -34,3 +34,6 @@ kubeconfig.yaml
 
 # Kubernetes secrets (contains passwords)
 k8s/secret.yaml
+
+# macOS Finder metadata
+.DS_Store
