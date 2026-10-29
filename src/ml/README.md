@@ -9,9 +9,7 @@ src/ml/
 ├── data/
 │   ├── file_loader.py          # Loads the road network adjacency list and road metadata
 │   └── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
-├── config.py                   # Hyperparameters and device selection
-├── logging_utils.py            # Shared logger (writes to artifacts/training_debug.log)
-└── trainer.py                  # Training, validation, early stopping, saving results
+└── config.py                   # Hyperparameters and device selection
 ```
 
 Datasets go in `data/` and training outputs in `artifacts/` (models in `artifacts/models/`, result JSON in `artifacts/results/`). Both folders are git-ignored.
@@ -22,6 +20,5 @@ The previous travel-time imputation models and dataset have been removed. Still 
 
 - Put the road network files in `data/`: the edge connections CSV (`edge_id, vertex_start_id, vertex_end_id`) and the OSM roads JSON (`{way_id: {nodes, road_type, oneway}}`), same format as before.
 - `road_graph_builder.py`: `road_type` is currently one-hot encoded as an input feature. It must become the label (`y`) instead, otherwise the model sees the answer.
-- `trainer.py`: still uses the regression loss and metrics (MSE, MAPE, bias) and the time-series batch format. Switch to cross-entropy and accuracy / macro-F1.
-- `config.py`: remove the time-series parameters (`SEQ_LEN`, `MASK_RATE`) once the trainer no longer uses them.
+- `config.py`: still holds the time-series parameters of the old travel-time trainer (removed). Replace them with the road type settings.
 - Add a model and a training entry point.
