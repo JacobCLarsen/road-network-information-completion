@@ -14,8 +14,7 @@ road-network-information-completion/
 │   │   └── schemas/            # Pydantic request/response models
 │   └── ml/                     # Model training (see src/ml/README.md)
 │       ├── data/               # Dataset loading and road graph building
-│       ├── config.py           # Training configuration
-│       └── trainer.py          # Training / evaluation loop
+│       └── config.py           # Training configuration
 ├── tests/
 │   ├── api/                    # API unit + integration tests
 │   └── ml/                     # ML unit tests
