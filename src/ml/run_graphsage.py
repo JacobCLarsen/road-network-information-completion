@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
+from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import GraphSAGE
 
 
@@ -85,23 +86,41 @@ if __name__ == "__main__":
     # and training jumps around, too small and it learns very slowly. 0.01 is a common starting point.
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-    # Forward: one row of 21 road type scores per segment
-    out = model(x_standardized, graph["edge_index"])
-    # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
-    # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
-    # An untrained model starts at around ln(21) = 3.0, the loss of guessing all road types equally.
-    loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
-    print("Training loss:", loss.item())
-
-    # Backward: work out for every weight which direction lowers the loss (the gradients)
-    loss.backward()
-    # Step: move every weight a little in that direction
-    optimizer.step()
-
-    # Run the model again to see that one step already lowered the loss
-    out = model(x_standardized, graph["edge_index"])
-    loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
-    print("Training loss after one step:", loss.item())
-
+    # Train for 50 epochs. Each epoch runs the model on the whole graph once and changes the weights once.
     for epoch in range(50):
-        print(f"Epoch {epoch + 1}")
+        # Clear the gradients from the previous epoch. PyTorch adds new gradients to the old ones, so without this
+        # every step would also include the directions of all earlier steps.
+        optimizer.zero_grad()
+
+        # Forward: one row of scores per segment, one score per road type
+        out = model(x_standardized, graph["edge_index"])
+        # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
+        # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
+        # An untrained model starts at around ln(number of road types), the loss of guessing all road types equally.
+        loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
+        # Backward: work out for every weight which direction lowers the loss (the gradients)
+        loss.backward()
+        # Step: move every weight a little in that direction
+        optimizer.step()
+
+        print(f"Training loss after epoch {epoch + 1}: {loss.item():.4f}")
+
+    # Evaluation mode turns dropout off, so the trained model gives its full predictions
+    model.eval()
+    out = model(x_standardized, graph["edge_index"])
+    # The road type with the highest score is the model's prediction
+    predictions = out.argmax(dim=1)
+
+    # Score the predictions on the validation segments with the shared evaluation function. Macro-F1 is averaged over
+    # the road types that occur in the data, so road types without any segments do not pull it down. This list will
+    # change once the group has decided the final class set.
+    labels = labels_in_data(graph["y"], graph["mask"])
+    result = evaluate(graph["y"][val_mask], predictions[val_mask], labels, class_names=ROAD_CLASSES)
+
+    # Macro-F1 is the main metric. Grouped macro-F1 scores only the coarse categories (highways, main roads, minor
+    # roads), and accuracy is shown for comparison with the majority-class baseline.
+    print(f"Validation macro-F1: {result['macro_f1']:.4f}")
+    print(f"Validation grouped macro-F1: {result['grouped_macro_f1']:.4f}")
+    print(f"Validation accuracy: {result['accuracy']:.4f}")
+    for name, scores in result["per_class"].items():
+        print(f"{name}: precision {scores['precision']:.3f}, recall {scores['recall']:.3f}, F1 {scores['f1']:.3f}")
