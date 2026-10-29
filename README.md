@@ -14,7 +14,9 @@ road-network-information-completion/
 │   │   └── schemas/            # Pydantic request/response models
 │   └── ml/                     # Model training (see src/ml/README.md)
 │       ├── data/               # Dataset loading and road graph building
-│       └── config.py           # Training configuration
+│       ├── models/             # One folder per model (e.g. graphsage/)
+│       ├── config.py           # Settings shared by all models
+│       └── evaluation.py       # Shared evaluation (macro-F1 etc.)
 ├── tests/
 │   ├── api/                    # API unit + integration tests
 │   └── ml/                     # ML unit tests
@@ -49,6 +51,9 @@ See [src/api/README.md](src/api/README.md) for detailed setup instructions.
 ### Machine Learning
 ```bash
 pip install -r requirements-ml.txt
+
+# Train and evaluate GraphSAGE (needs the map in data/bj_data/map/)
+python -m src.ml.models.graphsage.run_graphsage
 ```
 
 See [src/ml/README.md](src/ml/README.md).
@@ -56,7 +61,7 @@ See [src/ml/README.md](src/ml/README.md).
 ## Testing
 
 ```bash
-# API tests (what CI runs)
+# API tests
 pytest tests/api/ -v
 
 # ML tests (requires requirements-ml.txt)
