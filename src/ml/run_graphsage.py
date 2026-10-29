@@ -43,8 +43,32 @@ if __name__ == "__main__":
     builder = RoadGraphBuilder(segments)
     graph = builder.get_static_components()
 
+    # Every road has a highway tag: in OpenStreetMap, the highway tag is what marks a line as a road, and the map was
+    # made with OSMnx (the u, v, key and osmid fields are its format), which only downloads lines that have one.
+    # But 912 segments have a tag that is not in ROAD_CLASSES:
+    # - 906 have several road types at once (e.g. "['residential', 'tertiary']" or "['motorway_link', 'primary_link']"),
+    #   because OSMnx merged road pieces of different types into one edge.
+    # - 6 have a single type that is not in the class list (4 "disused" and 2 "rest_area").
+    # The graph builder gives these segments y = -1 and mask = False: they stay in the graph as neighbours, but are
+    # never used for training or evaluation.
+    print("Segments:", len(segments))
+    print("Labeled:", graph["mask"].sum().item())
+    print("Unlabeled:", (graph["y"] == -1).sum().item())
+
+    # Split the labelled segments into train, validation and test
+    train_mask, val_mask, test_mask = make_split(graph["mask"], seed=42)
+    print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
+
+    # Standardise every feature to mean 0 and standard deviation 1, so no feature dominates because of its scale.
+    # The mean and standard deviation come from the training segments only, so nothing is learned from the
+    # validation and test segments. They are then applied to all segments, because the model uses every segment's
+    # features as neighbours.
+    feature_mean = graph["x"][train_mask].mean(dim=0)
+    feature_std = graph["x"][train_mask].std(dim=0)
+    x_standardized = (graph["x"] - feature_mean) / feature_std
+
     # The number of features each road segment has, read from the data so it stays correct if features are added.
-    road_features = graph["x"].shape[1]
+    road_features = x_standardized.shape[1]
     # Hidden size: after the first layer, each road segment is described by this many learned numbers, which the
     # second layer uses to score the road types. Bigger can capture more patterns but is slower and overfits more
     # easily. 64 is a starting point; tune it on the validation set.
@@ -56,22 +80,5 @@ if __name__ == "__main__":
     dropout = 0.5
 
     model = GraphSAGE(road_features, working_space, road_types, dropout)
-    out = model(graph["x"], graph["edge_index"])
-
-    print("Segments:", len(segments))
-    print("x:", graph["x"].shape)
-    print("edge_index:", graph["edge_index"].shape)
+    out = model(x_standardized, graph["edge_index"])
     print("Model output:", out.shape)
-    # Every road has a highway tag: in OpenStreetMap, the highway tag is what marks a line as a road, and the map was
-    # made with OSMnx (the u, v, key and osmid fields are its format), which only downloads lines that have one.
-    # But 912 segments have a tag that is not in ROAD_CLASSES:
-    # - 906 have several road types at once (e.g. "['residential', 'tertiary']" or "['motorway_link', 'primary_link']"),
-    #   because OSMnx merged road pieces of different types into one edge.
-    # - 6 have a single type that is not in the class list (4 "disused" and 2 "rest_area").
-    # The graph builder gives these segments y = -1 and mask = False: they stay in the graph as neighbours, but are
-    # never used for training or evaluation.
-    print("Labeled:", graph["mask"].sum().item())
-    print("Unlabeled:", (graph["y"] == -1).sum().item())
-
-    train_mask, val_mask, test_mask = make_split(graph["mask"], seed=42)
-    print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
