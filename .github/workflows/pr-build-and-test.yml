@@ -20,13 +20,17 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir -r requirements-ml.txt
 
       - name: Run API tests
         env:
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
         run: |
           pytest tests/api/ -v --cov=src/api --cov-report=term --cov-report=html
+
+      - name: Run ML tests
+        run: |
+          pytest tests/ml/ -v --cov=src/ml --cov-report=term
 
       - name: Build Docker image
         run: |
