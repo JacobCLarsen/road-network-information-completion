@@ -6,6 +6,7 @@ from src.ml import config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.evaluation import evaluate, labels_in_data
+from src.ml.models.graphsage import config as sage_config
 from src.ml.models.graphsage.graphsage import GraphSAGE
 
 
@@ -76,10 +77,10 @@ if __name__ == "__main__":
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
 
-    # Hidden size, dropout and learning rate come from the GraphSAGE section of src/ml/config.py
-    model = GraphSAGE(road_features, config.GRAPHSAGE_WORKING_SPACE, road_types, config.GRAPHSAGE_DROPOUT)
+    # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/config.py)
+    model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
     # Adam changes the model's weights to lower the loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.GRAPHSAGE_LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE)
 
     for epoch in range(config.EPOCHS):
         # Clear the gradients from the previous epoch. PyTorch adds new gradients to the old ones, so without this
