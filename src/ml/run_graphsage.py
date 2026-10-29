@@ -31,3 +31,13 @@ if __name__ == "__main__":
     print("x:", graph["x"].shape)
     print("edge_index:", graph["edge_index"].shape)
     print("Model output:", out.shape)
+    # Every road has a highway tag: in OpenStreetMap, the highway tag is what marks a line as a road, and the map was
+    # made with OSMnx (the u, v, key and osmid fields are its format), which only downloads lines that have one.
+    # But 912 segments have a tag that is not in ROAD_CLASSES:
+    # - 906 have several road types at once (e.g. "['residential', 'tertiary']" or "['motorway_link', 'primary_link']"),
+    #   because OSMnx merged road pieces of different types into one edge.
+    # - 6 have a single type that is not in the class list (4 "disused" and 2 "rest_area").
+    # The graph builder gives these segments y = -1 and mask = False: they stay in the graph as neighbours, but are
+    # never used for training or evaluation.
+    print("Labeled:", graph["mask"].sum().item())
+    print("Unlabeled:", (graph["y"] == -1).sum().item())
