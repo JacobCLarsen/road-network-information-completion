@@ -1,4 +1,4 @@
-# src/ml/models/graphsage.py
+# src/ml/models/graphsage/graphsage.py
 
 import torch
 import torch.nn.functional as F

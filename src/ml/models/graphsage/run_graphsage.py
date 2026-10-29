@@ -1,14 +1,15 @@
-# src/ml/run_graphsage.py
+# src/ml/models/graphsage/run_graphsage.py
 
 import torch
 import torch.nn.functional as F
+from src.ml import config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.evaluation import evaluate, labels_in_data
-from src.ml.models.graphsage import GraphSAGE
+from src.ml.models.graphsage.graphsage import GraphSAGE
 
 
-def make_split(mask, seed, train_share=0.6, val_share=0.2):
+def make_split(mask, seed, train_share, val_share):
     """
     TEMPORARY random split, to be replaced by the group's split later. Anything that returns the same three masks
     can take its place.
@@ -39,7 +40,7 @@ def make_split(mask, seed, train_share=0.6, val_share=0.2):
 
 if __name__ == "__main__":
     # Load the Beijing road network and build the line graph (one vertex per road segment)
-    loader = ShapefileMapLoader("data/bj_data/map")
+    loader = ShapefileMapLoader(config.DATA_DIR)
     segments = loader.get_segments()
 
     builder = RoadGraphBuilder(segments)
@@ -58,7 +59,8 @@ if __name__ == "__main__":
     print("Unlabeled:", (graph["y"] == -1).sum().item())
 
     # Split the labelled segments into train, validation and test
-    train_mask, val_mask, test_mask = make_split(graph["mask"], seed=42)
+    train_mask, val_mask, test_mask = make_split(graph["mask"], config.SPLIT_SEED, config.TRAIN_SHARE,
+                                                 config.VAL_SHARE)
     print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
 
     # Standardise every feature to mean 0 and standard deviation 1, so no feature dominates because of its scale.
@@ -71,23 +73,15 @@ if __name__ == "__main__":
 
     # The number of features each road segment has, read from the data so it stays correct if features are added.
     road_features = x_standardized.shape[1]
-    # Hidden size: after the first layer, each road segment is described by this many learned numbers, which the
-    # second layer uses to score the road types. Bigger can capture more patterns but is slower and overfits more
-    # easily. 64 is a starting point; tune it on the validation set.
-    working_space = 64
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
-    # Dropout is only active during training. It sets some values to zero so the model learns patterns instead of
-    # memorising the training roads.
-    dropout = 0.5
 
-    model = GraphSAGE(road_features, working_space, road_types, dropout)
-    # Adam changes the model's weights to lower the loss. lr (the learning rate) is how big each change is: too big
-    # and training jumps around, too small and it learns very slowly. 0.01 is a common starting point.
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    # Hidden size, dropout and learning rate come from the GraphSAGE section of src/ml/config.py
+    model = GraphSAGE(road_features, config.GRAPHSAGE_WORKING_SPACE, road_types, config.GRAPHSAGE_DROPOUT)
+    # Adam changes the model's weights to lower the loss
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.GRAPHSAGE_LEARNING_RATE)
 
-    # Train for 50 epochs. Each epoch runs the model on the whole graph once and changes the weights once.
-    for epoch in range(50):
+    for epoch in range(config.EPOCHS):
         # Clear the gradients from the previous epoch. PyTorch adds new gradients to the old ones, so without this
         # every step would also include the directions of all earlier steps.
         optimizer.zero_grad()
