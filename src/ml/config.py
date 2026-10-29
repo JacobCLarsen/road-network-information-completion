@@ -1,19 +1,17 @@
-import torch
+# src/ml/config.py
 
-# Data Params
-SEQ_LEN = 12
-BATCH_SIZE = 1
-MASK_RATE = 0.2
+# Settings shared by all models. Every model must use the same values, so their results can be compared fairly.
+# Settings that belong to one model (and are tuned on the validation set) are in that model's own config.py,
+# e.g. src/ml/models/graphsage/config.py.
 
-# Model Architecture Params
-GAT_HIDDEN_DIM = 128
-GRU_HIDDEN_DIM = 128
-GRU_LAYERS = 2
-GAT_HEADS = 2
-DROPOUT = 0.3
+# Folder with the road network shapefile (edges.shp and its companion files)
+DATA_DIR = "data/bj_data/map"
 
-# Training Params
-NUM_EPOCHS = 1
-LEARNING_RATE = 0.002
-PATIENCE = 10
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# The labelled segments are split into training, validation and test. The test share is the rest (here 20%).
+TRAIN_SHARE = 0.6
+VAL_SHARE = 0.2
+# The same seed always gives the same split
+SPLIT_SEED = 42
+
+# Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
+EPOCHS = 50

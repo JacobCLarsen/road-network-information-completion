@@ -4,3 +4,4 @@ pandas
 torch
 torch_geometric
 pyshp
+scikit-learn
