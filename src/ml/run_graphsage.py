@@ -1,6 +1,7 @@
 # src/ml/run_graphsage.py
 
 import torch
+import torch.nn.functional as F
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.models.graphsage import GraphSAGE
@@ -80,5 +81,24 @@ if __name__ == "__main__":
     dropout = 0.5
 
     model = GraphSAGE(road_features, working_space, road_types, dropout)
+    # Adam changes the model's weights to lower the loss. lr (the learning rate) is how big each change is: too big
+    # and training jumps around, too small and it learns very slowly. 0.01 is a common starting point.
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+    # Forward: one row of 21 road type scores per segment
     out = model(x_standardized, graph["edge_index"])
-    print("Model output:", out.shape)
+    # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
+    # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
+    # An untrained model starts at around ln(21) = 3.0, the loss of guessing all road types equally.
+    loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
+    print("Training loss:", loss.item())
+
+    # Backward: work out for every weight which direction lowers the loss (the gradients)
+    loss.backward()
+    # Step: move every weight a little in that direction
+    optimizer.step()
+
+    # Run the model again to see that one step already lowered the loss
+    out = model(x_standardized, graph["edge_index"])
+    loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
+    print("Training loss after one step:", loss.item())
