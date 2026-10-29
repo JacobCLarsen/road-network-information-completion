@@ -102,3 +102,6 @@ if __name__ == "__main__":
     out = model(x_standardized, graph["edge_index"])
     loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
     print("Training loss after one step:", loss.item())
+
+    for epoch in range(50):
+        print(f"Epoch {epoch + 1}")
