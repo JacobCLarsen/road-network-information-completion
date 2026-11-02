@@ -5,38 +5,10 @@ import torch.nn.functional as F
 from src.ml import config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
+from src.ml.data.split import train_val_test_split
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import config as sage_config
 from src.ml.models.graphsage.graphsage import GraphSAGE
-
-
-def make_split(mask, seed, train_share, val_share):
-    """
-    TEMPORARY random split, to be replaced by the group's split later. Anything that returns the same three masks
-    can take its place.
-
-    Only labelled segments (mask = True) are split. Returns train_mask, val_mask and test_mask: one True/False value
-    per segment, with no segment in more than one mask. The same seed always gives the same split.
-    """
-    # Positions of the labelled segments, in random order
-    labelled = mask.nonzero().view(-1)
-    generator = torch.Generator().manual_seed(seed)
-    shuffled = labelled[torch.randperm(len(labelled), generator=generator)]
-
-    # Cut the shuffled list into train, validation and test (the rest)
-    n_train = int(train_share * len(shuffled))
-    n_val = int(val_share * len(shuffled))
-    parts = [shuffled[:n_train], shuffled[n_train:n_train + n_val], shuffled[n_train + n_val:]]
-
-    # Turn each part into a True/False mask over all segments
-    masks = []
-    for part in parts:
-        part_mask = torch.zeros(len(mask), dtype=torch.bool)
-        part_mask[part] = True
-        masks.append(part_mask)
-
-    train_mask, val_mask, test_mask = masks
-    return train_mask, val_mask, test_mask
 
 
 if __name__ == "__main__":
@@ -60,8 +32,8 @@ if __name__ == "__main__":
     print("Unlabeled:", (graph["y"] == -1).sum().item())
 
     # Split the labelled segments into train, validation and test
-    train_mask, val_mask, test_mask = make_split(graph["mask"], config.SPLIT_SEED, config.TRAIN_SHARE,
-                                                 config.VAL_SHARE)
+    train_mask, val_mask, test_mask = train_val_test_split(graph["mask"], config.SPLIT_SEED, config.TRAIN_SHARE,
+                                                           config.VAL_SHARE)
     print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
 
     # Standardise every feature to mean 0 and standard deviation 1, so no feature dominates because of its scale.

@@ -8,7 +8,8 @@ Model training for road type prediction.
 src/ml/
 ├── data/
 │   ├── file_loader.py          # Loads the road network shapefile into road segments
-│   └── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
+│   ├── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
+│   └── split.py                # Splits the labelled segments into train, validation and test (shared by all models)
 ├── models/
 │   └── graphsage/
 │       ├── config.py           # GraphSAGE settings (hidden size, dropout, learning rate)
@@ -43,6 +44,6 @@ Give each model its own folder in `models/` with a model file, a run script and 
 
 Still to do for road type prediction:
 
-- The train/validation/test split in `run_graphsage.py` is temporary. It will be replaced by a shared split in `src/ml/data/split.py`.
+- The train/validation/test split in `src/ml/data/split.py` is a temporary random split. It will be replaced by the group's final split.
 - Class set: merge `*_link` types into their parent type and drop very rare types, as described in the report.
 - GraphSAGE: class weights, early stopping, the label trick and tuning.
