@@ -15,6 +15,7 @@ src/ml/
 │       ├── config.py           # GraphSAGE settings (hidden size, dropout, learning rate)
 │       ├── graphsage.py        # The GraphSAGE model
 │       └── run_graphsage.py    # Trains GraphSAGE and scores it on the validation set
+├── class_weights.py            # Shared class weights for the loss, so rare road types count more
 ├── config.py                   # Settings shared by all models (data path, split, epochs)
 └── evaluation.py               # Shared evaluation: macro-F1, accuracy, per-class and grouped scores
 ```

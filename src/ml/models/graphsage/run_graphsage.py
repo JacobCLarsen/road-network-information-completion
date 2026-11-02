@@ -3,6 +3,7 @@
 import torch
 import torch.nn.functional as F
 from src.ml import config
+from src.ml.class_weights import compute_class_weights
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split import train_val_test_split
@@ -49,6 +50,11 @@ if __name__ == "__main__":
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
 
+    # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
+    # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
+    class_weights = compute_class_weights(graph["y"][train_mask], road_types)
+    print("Class weights:", [round(w, 2) for w in class_weights.tolist()])
+
     # Fix the random starting weights and dropout pattern, so every run gives the same result. This must come before
     # the model is created, because that is when the starting weights are drawn.
     torch.manual_seed(config.MODEL_SEED)
@@ -68,7 +74,9 @@ if __name__ == "__main__":
         # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
         # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
         # An untrained model starts at around ln(number of road types), the loss of guessing all road types equally.
-        loss = F.cross_entropy(out[train_mask], graph["y"][train_mask])
+        
+        # The class weights make mistakes on rare road types count more.
+        loss = F.cross_entropy(out[train_mask], graph["y"][train_mask], weight=class_weights)
         # Backward: work out for every weight which direction lowers the loss (the gradients)
         loss.backward()
         # Step: move every weight a little in that direction
