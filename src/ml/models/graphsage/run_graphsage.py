@@ -49,6 +49,10 @@ if __name__ == "__main__":
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
 
+    # Fix the random starting weights and dropout pattern, so every run gives the same result. This must come before
+    # the model is created, because that is when the starting weights are drawn.
+    torch.manual_seed(config.MODEL_SEED)
+
     # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/config.py)
     model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
     # Adam changes the model's weights to lower the loss
@@ -74,7 +78,9 @@ if __name__ == "__main__":
 
     # Evaluation mode turns dropout off, so the trained model gives its full predictions
     model.eval()
-    out = model(x_standardized, graph["edge_index"])
+    # Gradients are only needed for training, so they are switched off here to save memory and time
+    with torch.no_grad():
+        out = model(x_standardized, graph["edge_index"])
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 
