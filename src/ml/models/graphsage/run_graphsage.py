@@ -21,10 +21,10 @@ if __name__ == "__main__":
 
     # Every road has a highway tag: in OpenStreetMap, the highway tag is what marks a line as a road, and the map was
     # made with OSMnx (the u, v, key and osmid fields are its format), which only downloads lines that have one.
-    # But 912 segments have a tag that is not in ROAD_CLASSES:
-    # - 906 have several road types at once (e.g. "['residential', 'tertiary']" or "['motorway_link', 'primary_link']"),
-    #   because OSMnx merged road pieces of different types into one edge.
-    # - 6 have a single type that is not in the class list (4 "disused" and 2 "rest_area").
+    # Link roads get the label of their parent type. These segments have no label:
+    # - Segments with several road types at once (e.g. "['residential', 'tertiary']" or
+    #   "['motorway_link', 'primary_link']"), because OSMnx merged road pieces of different types into one edge.
+    # - Segments of a rare road type (RARE_ROAD_TYPES) or any other type that is not in ROAD_CLASSES.
     # The graph builder gives these segments y = -1 and mask = False: they stay in the graph as neighbours, but are
     # never used for training or evaluation.
     print("Segments:", len(segments))
@@ -36,16 +36,11 @@ if __name__ == "__main__":
                                                            config.VAL_SHARE)
     print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
 
-    # Standardise every feature to mean 0 and standard deviation 1, so no feature dominates because of its scale.
-    # The mean and standard deviation come from the training segments only, so nothing is learned from the
-    # validation and test segments. They are then applied to all segments, because the model uses every segment's
-    # features as neighbours.
-    feature_mean = graph["x"][train_mask].mean(dim=0)
-    feature_std = graph["x"][train_mask].std(dim=0)
-    x_standardized = (graph["x"] - feature_mean) / feature_std
+    # Standardise the features, with the mean and standard deviation of the training segments only
+    builder.standardize_features(segments, train_mask)
 
     # The number of features each road segment has, read from the data so it stays correct if features are added.
-    road_features = x_standardized.shape[1]
+    road_features = graph["x"].shape[1]
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
 
@@ -60,7 +55,7 @@ if __name__ == "__main__":
         optimizer.zero_grad()
 
         # Forward: one row of scores per segment, one score per road type
-        out = model(x_standardized, graph["edge_index"])
+        out = model(graph["x"], graph["edge_index"])
         # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
         # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
         # An untrained model starts at around ln(number of road types), the loss of guessing all road types equally.
@@ -74,7 +69,7 @@ if __name__ == "__main__":
 
     # Evaluation mode turns dropout off, so the trained model gives its full predictions
     model.eval()
-    out = model(x_standardized, graph["edge_index"])
+    out = model(graph["x"], graph["edge_index"])
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 

@@ -4,13 +4,23 @@ import math
 import torch
 
 # The road types we want to predict. A segment's label is the position of its road type in this list.
+# Link roads are not listed, as they are merged into their parent type (see LINK_ROAD_MAPPINGS).
 ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
-                "residential", "motorway_link", "trunk_link", "primary_link", "secondary_link",
-                "tertiary_link", "living_street", "service", "pedestrian", "track", "bus_guideway",
-                "escape", "raceway", "road", "busway"]
+                "residential", "living_street", "bus_guideway"]
 
 # Values of the oneway tag that mean the road is one-way
 ONEWAY_VALUES = ["yes", "true", "1", "-1"]
+
+LINK_ROAD_MAPPINGS = {
+    "motorway_link": "motorway",
+    "trunk_link": "trunk",
+    "primary_link": "primary",
+    "secondary_link": "secondary",
+    "tertiary_link": "tertiary",
+}
+
+# Rare road types are removed, as there is not enough data to learn them anyway. They are then just noise
+RARE_ROAD_TYPES = ["road", "escape", "disused", "rest_area", "busway", "raceway", "track", "pedestrian", "service"]
 
 EARTH_RADIUS_M = 6371000.0
 
@@ -54,9 +64,9 @@ def haversine(point_a, point_b):
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
 
 
-def compute_features(segment):
+def compute_raw_features(segment):
     """
-    Returns the features of a segment: [log(length), curvature, one_way].
+    Returns the raw (unscaled) features of a segment: [log(length), curvature, one_way].
     """
     # Length along the road: add up the distances between consecutive points
     length = 0.0
@@ -72,7 +82,7 @@ def compute_features(segment):
     straight_distance = haversine(first_point, last_point)
     curvature = 1 - straight_distance / length
 
-    # Rounding errors can push curvature slightly outside [0, 1] (e.g. -2e-16 for a straight road), so curvature is clamped.
+    # Rounding errors can push curvature slightly outside [0, 1], so curvature is clamped
     curvature = min(max(curvature, 0.0), 1.0)
 
     # One-way: 1 if the road is one-way, otherwise 0
@@ -81,6 +91,72 @@ def compute_features(segment):
         one_way = 1
 
     return [math.log(length), curvature, one_way]
+
+
+def mean_and_std(values):
+    """
+    Returns the mean (mu) and standard deviation (sigma) of a list of numbers.
+    """
+    n = len(values)
+
+    total = 0.0
+    for v in values:
+        total = total + v
+    mean = total / n
+
+    squared_diff_sum = 0.0
+    for v in values:
+        squared_diff_sum = squared_diff_sum + (v - mean) ** 2
+    std = math.sqrt(squared_diff_sum / n)
+
+    # If every value is the same, sigma is 0; use 1 to avoid dividing by zero
+    if std == 0.0:
+        std = 1.0
+
+    return mean, std
+
+
+def fit_standardizer(train_segments, train_degrees):
+    """
+    Computes mu and sigma for log(length), curvature and degree over the training segments.
+    one_way is not standardized, so it gets no mu or sigma.
+    train_degrees holds the degree of each training segment, in the same order as train_segments.
+    Returns (length_mean, length_std, curv_mean, curv_std, degree_mean, degree_std).
+    """
+    log_lengths = []
+    curvatures = []
+    for segment in train_segments:
+        log_length, curvature, one_way = compute_raw_features(segment)
+        log_lengths.append(log_length)
+        curvatures.append(curvature)
+
+    length_mean, length_std = mean_and_std(log_lengths)
+    curv_mean, curv_std = mean_and_std(curvatures)
+    degree_mean, degree_std = mean_and_std(train_degrees)
+
+    return length_mean, length_std, curv_mean, curv_std, degree_mean, degree_std
+
+
+def standardize(x, mean, std):
+    """
+    Applies z = (x - mu) / sigma to one feature value.
+    """
+    return (x - mean) / std
+
+
+# z-score scaling is used to standardize input features.
+def compute_features(segment, degree, length_mean, length_std, curv_mean, curv_std, degree_mean, degree_std):
+    """
+    Returns [z_log_length, z_curvature, one_way, z_degree]. one_way stays 0 or 1.
+    """
+    log_length, curvature, one_way = compute_raw_features(segment)
+    return [
+        standardize(log_length, length_mean, length_std),
+        standardize(curvature, curv_mean, curv_std),
+        # Oneway is not standardized, as it is binary
+        one_way,
+        standardize(degree, degree_mean, degree_std),
+    ]
 
 
 def add_to_junction(segments_at_junction, junction, segment_index):
@@ -100,7 +176,8 @@ class RoadGraphBuilder:
         classes:  List of road types used as labels.
 
         After building, the results are stored in:
-            x:               Features of each segment (tensor, one row per segment)
+            x:               Raw features of each segment (tensor, one row per segment), until
+                             standardize_features is called
             y:               Label of each segment, or -1 if its road type is not in classes
             mask:            True if the segment has a label, otherwise False
             edge_index:      The connected pairs of segments (tensor with 2 rows)
@@ -132,15 +209,22 @@ class RoadGraphBuilder:
                 self.edge_to_segment[edge_id] = i
 
             # If the segment has a valid label, use it, otherwise it is not used in training
-            if segment.highway in classes:
-                y.append(classes.index(segment.highway))
-                mask.append(True)
-            else:
+            road_type = segment.highway
+
+            # Merge link roads into their parent type, e.g. "primary_link" -> "primary"
+            if road_type in LINK_ROAD_MAPPINGS:
+                road_type = LINK_ROAD_MAPPINGS[road_type]
+
+            # Rare or unknown road types get label -1 and are masked out
+            if road_type in RARE_ROAD_TYPES or road_type not in classes:
                 y.append(-1)
                 mask.append(False)
+            else:
+                y.append(classes.index(road_type))
+                mask.append(True)
 
             # Add the features
-            x.append(compute_features(segment))
+            x.append(compute_raw_features(segment))
 
             # Remember which junctions the segment touches
             add_to_junction(segments_at_junction, segment.u, i)
@@ -166,6 +250,8 @@ class RoadGraphBuilder:
         for i in range(num_segments):
             x[i].append(degree[i])
 
+        self.degree = degree
+
         # Convert to tensors for PyTorch
         self.x = torch.tensor(x, dtype=torch.float).reshape(num_segments, 4)
         self.y = torch.tensor(y, dtype=torch.long)
@@ -178,6 +264,28 @@ class RoadGraphBuilder:
             sources.append(a)
             targets.append(b)
         self.edge_index = torch.tensor([sources, targets], dtype=torch.long)
+
+    def standardize_features(self, segments, train_mask):
+        """
+        Replaces the raw features in x with standardized ones. Called after the split, because mu and sigma come
+        from the training segments only, so nothing is learned from the validation and test segments. They are then
+        applied to all segments, because the model uses every segment's features as neighbours.
+
+        x is updated in place, so a dictionary from get_static_components sees the new values.
+
+        segments:   The same list of Segment objects the graph was built from.
+        train_mask: True for the training segments.
+        """
+        train_indices = train_mask.nonzero().view(-1).tolist()
+        train_segments = [segments[i] for i in train_indices]
+        train_degrees = [self.degree[i] for i in train_indices]
+        stats = fit_standardizer(train_segments, train_degrees)
+
+        x = []
+        for i in range(len(segments)):
+            x.append(compute_features(segments[i], self.degree[i], *stats))
+
+        self.x.copy_(torch.tensor(x, dtype=torch.float))
 
     def get_static_components(self):
         """
