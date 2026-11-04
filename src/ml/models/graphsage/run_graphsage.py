@@ -81,7 +81,9 @@ if __name__ == "__main__":
 
     # Evaluation mode turns dropout off, so the trained model gives its full predictions
     model.eval()
-    out = model(graph["x"], graph["edge_index"])
+    # Gradients are only needed for training, so they are switched off here to save memory and time
+    with torch.no_grad():
+        out = model(graph["x"], graph["edge_index"])
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 
