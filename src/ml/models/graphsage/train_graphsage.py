@@ -1,8 +1,12 @@
-# src/ml/models/graphsage/run_graphsage.py
+# src/ml/models/graphsage/train_graphsage.py
+
+# Prepares the data and trains GraphSAGE. Used by dev_run_graphsage.py (scored on the validation set during
+# development) and final_testrun_graphsage.py (scored on the test set once, at the end).
+
+import copy
 
 import torch
 import torch.nn.functional as F
-import copy
 
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
@@ -10,11 +14,15 @@ from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split import train_val_test_split
 from src.ml.evaluation import evaluate, labels_in_data
-from src.ml.models.graphsage import config as sage_config
-from src.ml.models.graphsage.graphsage import GraphSAGE
+from src.ml.models.graphsage import graphsage_config as sage_config
+from src.ml.models.graphsage.graphsage_model import GraphSAGE
 
 
-if __name__ == "__main__":
+def prepare_data():
+    # Everything that is the same for every training run: the graph, the split, the standardised features, the class
+    # weights and the road types that occur. Done once, then reused for every seed.
+    # Returns graph, train_mask, val_mask, test_mask, class_weights, labels.
+
     # Load the Beijing road network and build the line graph (one vertex per road segment)
     loader = ShapefileMapLoader(config.DATA_DIR)
     segments = loader.get_segments()
@@ -35,33 +43,41 @@ if __name__ == "__main__":
     # Split the labelled segments into train, validation and test
     train_mask, val_mask, test_mask = train_val_test_split(graph["mask"], config.SPLIT_SEED, config.TRAIN_SHARE, config.VAL_SHARE)
     print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
-    
+
     # Standardise the features, with the mean and standard deviation of the training segments only
     builder.standardize_features(segments, train_mask)
+
+    # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
+    # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
+    class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES))
+
+    # The road types that occur in the data. Macro-F1 is averaged over these, so road types without any segments do not pull it down.
+    labels = labels_in_data(graph["y"], graph["mask"])
+
+    return graph, train_mask, val_mask, test_mask, class_weights, labels
+
+
+def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
+    # Trains one GraphSAGE model with the given seed and returns its predictions for every segment, from the epoch with
+    # the best validation macro-F1. Returns predictions, best_epoch, best_f1.
+    # The test set is not passed in, so it can never influence training or the choice of epoch.
 
     # The number of features each road segment has, read from the data so it stays correct if features are added.
     road_features = graph["x"].shape[1]
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
 
-    # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
-    # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
-    class_weights = compute_class_weights(graph["y"][train_mask], road_types)
+    # Fix the random starting weights and dropout pattern, so every run with this seed gives the same result. This must
+    # come before the model is created, because that is when the starting weights are drawn.
+    torch.manual_seed(seed)
 
-    # Fix the random starting weights and dropout pattern, so every run gives the same result. This must come before
-    # the model is created, because that is when the starting weights are drawn.
-    torch.manual_seed(config.MODEL_SEED)
-
-    # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/config.py)
+    # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/graphsage_config.py)
     model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
     # Adam changes the model's weights to lower the loss
     optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE)
 
-    # The road types that occur in the data. Macro-F1 is averaged over these, so road types without any segments do not pull it down.
-    labels = labels_in_data(graph["y"], graph["mask"])
-
-    # adds newlines between the print statements, so the output is easier to read when the script is run in a terminal
-    print("Training GraphSAGE model on the Beijing road network")
+    # Show what is being trained and with which settings
+    print(f"Training GraphSAGE with seed {seed}")
     print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
@@ -110,7 +126,7 @@ if __name__ == "__main__":
         print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
         print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")
 
-    # Go back to the weights from the best epoch, so the final evaluation uses the best model and not the last one
+    # Go back to the weights from the best epoch, so the predictions come from the best model and not the last one
     model.load_state_dict(best_state)
     print(f"Using the model from epoch {best_epoch} (validation macro-F1 {best_f1:.4f})")
 
@@ -124,13 +140,4 @@ if __name__ == "__main__":
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 
-    # Score the predictions on the validation segments with the shared evaluation function
-    result = evaluate(graph["y"][val_mask], predictions[val_mask], labels, class_names=ROAD_CLASSES)
-
-    # Macro-F1 is the main metric. Grouped macro-F1 scores only the coarse categories (highways, main roads, minor roads),
-    # and accuracy is shown for comparison with the majority-class baseline.
-    print(f"Validation macro-F1: {result['macro_f1']:.4f}")
-    print(f"Validation grouped macro-F1: {result['grouped_macro_f1']:.4f}")
-    print(f"Validation accuracy: {result['accuracy']:.4f}")
-    for name, scores in result["per_class"].items():
-        print(f"{name}: precision {scores['precision']:.3f}, recall {scores['recall']:.3f}, F1 {scores['f1']:.3f}")
+    return predictions, best_epoch, best_f1

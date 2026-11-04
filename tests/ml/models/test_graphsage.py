@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.ml.models.graphsage.graphsage import GraphSAGE
+from src.ml.models.graphsage.graphsage_model import GraphSAGE
 
 
 # A small hand-made graph of three road segments in a row: 0 - 1 - 2.

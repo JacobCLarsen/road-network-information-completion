@@ -1,8 +1,8 @@
 # src/ml/config.py
 
 # Settings shared by all models. Every model must use the same values, so their results can be compared fairly.
-# Settings that belong to one model (and are tuned on the validation set) are in that model's own config.py,
-# e.g. src/ml/models/graphsage/config.py.
+# Settings that belong to one model (and are tuned on the validation set) are in that model's own config file,
+# e.g. src/ml/models/graphsage/graphsage_config.py.
 
 # Folder with the road network shapefile (edges.shp and its companion files)
 DATA_DIR = "data/bj_data/map"
