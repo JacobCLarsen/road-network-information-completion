@@ -2,6 +2,7 @@
 
 """Imports"""
 from src.ml import config
+from src.ml.models.random_forest import config as forest_config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import ROAD_CLASSES, RoadGraphBuilder
 from src.ml.data.split import train_val_test_split
@@ -40,8 +41,15 @@ if __name__ == "__main__":
     validation_features = graph["x"][validation_mask].numpy()
     validation_labels = graph["y"][validation_mask].numpy()
 
-    # Train the classifier using only the labeled training segments.
-    classifier = train_random_forest(training_features, training_labels, random_state = config.MODEL_SEED)
+    # Train the classifier using only the labeled training segments and use the shared random seed and the Random Forest-specific parameters.
+    classifier = train_random_forest(
+        training_features,
+        training_labels,
+        random_state = config.MODEL_SEED,
+        n_estimators = forest_config.N_ESTIMATORS,
+        max_depth = forest_config.MAX_DEPTH,
+        class_weight = forest_config.CLASS_WEIGHT,
+    )
 
     # Predict the withheld validation labels and calculate the shared metrics.
     predictions = classifier.predict(validation_features)
