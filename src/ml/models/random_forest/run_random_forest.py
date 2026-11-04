@@ -1,5 +1,7 @@
 # src/ml/models/random_forest/run_random_forest.py
 
+print("Starting imports...", flush=True)
+
 """Imports"""
 from src.ml import config
 from src.ml.models.random_forest import config as forest_config
@@ -11,11 +13,17 @@ from src.ml.models.random_forest.random_forest import train_random_forest
 
 """Train and evaluate Random Forest on the Beijing road-network dataset."""
 
+print("Imports completed.", flush=True)
+
 # Run the training and evaluation pipeline when this file is executed directly.
 if __name__ == "__main__":
+    print("Loading road-network dataset...") # DEBUG TRACKING
+
     # Load the road segments from the Beijing dataset.
     loader = ShapefileMapLoader(config.DATA_DIR)
     segments = loader.get_segments()
+
+    print("Building road-network graph...") # DEBUG TRACKING
 
     # Build the road-network graph and obtain its features, labels, and connections.
     graph_builder = RoadGraphBuilder(segments)
@@ -41,6 +49,8 @@ if __name__ == "__main__":
     validation_features = graph["x"][validation_mask].numpy()
     validation_labels = graph["y"][validation_mask].numpy()
 
+    print("Training Random Forest...") # DEBUG TRACKING
+
     # Train the classifier using only the labeled training segments and use the shared random seed and the Random Forest-specific parameters.
     classifier = train_random_forest(
         training_features,
@@ -50,6 +60,8 @@ if __name__ == "__main__":
         max_depth = forest_config.MAX_DEPTH,
         class_weight = forest_config.CLASS_WEIGHT,
     )
+
+    print("Evaluating Random Forest...\n") # DEBUG TRACKING
 
     # Predict the withheld validation labels and calculate the shared metrics.
     predictions = classifier.predict(validation_features)
