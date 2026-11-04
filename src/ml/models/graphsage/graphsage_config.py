@@ -1,4 +1,4 @@
-# src/ml/models/graphsage/config.py
+# src/ml/models/graphsage/graphsage_config.py
 
 # GraphSAGE settings. These are tuned on the validation set, so they may differ from the values other models use.
 # Settings that must be the same for every model are in src/ml/config.py.
