@@ -11,6 +11,8 @@ src/ml/
 │   ├── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
 │   └── split_graph.py          # Splits the labelled segments into train, validation and test, random or spatial (shared by all models)
 ├── models/
+│   ├── majority/
+│   │   └── run_majority.py     # Majority-class baseline: always predicts the most frequent training road type
 │   └── graphsage/
 │       ├── graphsage_config.py # GraphSAGE settings (hidden size, dropout, learning rate)
 │       ├── graphsage_model.py  # The GraphSAGE model
@@ -39,6 +41,14 @@ Only once, at the very end, after all settings are chosen on the validation set:
 ```bash
 python -m src.ml.models.graphsage.final_testrun_graphsage
 ```
+
+## Running the majority-class baseline
+
+```bash
+python -m src.ml.models.majority.run_majority
+```
+
+It has no randomness and nothing to tune, so it runs once and is scored on both the validation and the test set. Every model should clearly beat its macro-F1.
 
 ## Configuration
 

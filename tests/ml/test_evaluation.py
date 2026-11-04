@@ -3,7 +3,7 @@ import statistics
 import pytest
 import torch
 from src.ml.evaluation import (evaluate, format_confusion_matrix, format_summary, grouped_evaluation, grouped_macro_f1,
-                               labels_in_data, summarize_runs)
+                               labels_in_data, majority_class_predictions, summarize_runs)
 
 
 def test_labels_in_data_skips_unlabelled_and_missing_types():
@@ -130,3 +130,20 @@ def test_format_confusion_matrix():
     assert lines[0].split()[-2:] == ["motorway", "trunk"]
     assert lines[1].split() == ["motorway", "2", "0"]
     assert lines[2].split() == ["trunk", "1", "1"]
+
+
+def test_majority_class_predictions_uses_most_frequent_training_label():
+    train_labels = torch.tensor([6, 6, 0, 6, 2])
+    predictions = majority_class_predictions(train_labels, 4)
+    assert predictions.tolist() == [6, 6, 6, 6]
+
+
+def test_majority_class_baseline_scores():
+    # Always predicting road type 1: accuracy is its share (3 of 4), but road type 0 gets F1 0.
+    # Road type 1 has precision 3/4 and recall 1, so F1 6/7
+    y_true = torch.tensor([1, 1, 1, 0])
+    predictions = majority_class_predictions(torch.tensor([1, 1, 0]), len(y_true))
+    result = evaluate(y_true, predictions, labels=[0, 1])
+    assert result["accuracy"] == 0.75
+    assert result["per_class"][0]["f1"] == 0.0
+    assert result["macro_f1"] == pytest.approx((6 / 7) / 2)

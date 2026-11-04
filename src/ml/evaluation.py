@@ -4,6 +4,7 @@ import statistics
 import warnings
 
 import numpy as np
+import torch
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_recall_fscore_support
 
 # The coarse road categories used for grouped evaluation (report Table 13), following the OSM road hierarchy.
@@ -25,6 +26,25 @@ def labels_in_data(y, mask):
     would always be 0 and only pull macro-F1 down.
     """
     return sorted(y[mask].unique().tolist())
+
+
+def majority_class_predictions(train_labels, num_segments):
+    """
+    Majority-class baseline (report section "Accuracy Paradox"): predicts the most frequent road type of the TRAINING
+    segments for every segment, ignoring the input. Score it with evaluate() on the same segments as the models.
+
+    It is a lower bound: its accuracy is the share of the most frequent road type, while its F1 is 0 for every other
+    road type, so its macro-F1 is very low. A model that does not clearly beat it on macro-F1 has learned little.
+
+    train_labels: The labels of the training segments only, so the majority class is never taken from validation or
+                  test labels.
+    num_segments: How many predictions to return, e.g. the number of segments in the graph.
+
+    Returns a tensor of length num_segments with the same road type index everywhere.
+    """
+    # bincount counts how often each road type occurs, argmax picks the most frequent (the lowest index on a tie)
+    majority_class = torch.bincount(train_labels).argmax()
+    return torch.full((num_segments,), majority_class.item(), dtype=torch.long)
 
 
 def _scores_per_label(y_true, y_pred, labels, names):
