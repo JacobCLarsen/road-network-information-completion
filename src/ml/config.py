@@ -12,8 +12,8 @@ DATA_DIR = "data/bj_data/map"
 TRAIN_SHARE = 0.6
 VAL_SHARE = 0.2
 
-# How the labelled segments are split: "random" or "spatial".
-SPLIT_STRATEGY = "random"
+# Graph Splitting Strategy: "random" or "spatial"
+STRATEGY = "random"
 
 # The same seed always gives the same split
 SPLIT_SEED = 42

@@ -9,7 +9,6 @@ src/ml/
 ├── data/
 │   ├── file_loader.py          # Loads the road network shapefile into road segments
 │   ├── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
-│   ├── split.py                # Old temporary random split, to be removed once GraphSAGE uses split_graph.py
 │   └── split_graph.py          # Splits the labelled segments into train, validation and test, random or spatial (shared by all models)
 ├── models/
 │   └── graphsage/
@@ -46,5 +45,5 @@ Give each model its own folder in `models/` with a model file, a run script and 
 
 Still to do for road type prediction:
 
-- `src/ml/data/split_graph.py` replaces the temporary `split.py`. GraphSAGE still uses `split.py` until `prepare_data()` is switched over; then `split.py` is deleted.
+- `src/ml/data/split_graph.py` replaces the old `split.py`, which is deleted. GraphSAGE still imports `split.py` and must be switched to `make_split_masks` before it runs again.
 - GraphSAGE: class weights, early stopping, the label trick and tuning.
