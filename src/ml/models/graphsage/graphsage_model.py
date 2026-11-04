@@ -11,7 +11,6 @@ class GraphSAGE(torch.nn.Module):
         # road_features: The number of features each road segment has.
         # working_space: The hidden size. The first layer describes each segment with this many learned numbers,
         #                which the second layer uses to score the road types.
-        
         # road_types: The second layer outputs one class score for each road type.
         # dropout: The share of values set to zero during training (e.g. 0.5 = half).
         self.layer1 = SAGEConv(in_channels=road_features, out_channels=working_space)
