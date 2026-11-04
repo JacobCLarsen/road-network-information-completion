@@ -12,9 +12,10 @@ TRAIN_SHARE = 0.6
 VAL_SHARE = 0.2
 # The same seed always gives the same split
 SPLIT_SEED = 42
-# The same seed always gives the same starting weights for the model. Kept separate from SPLIT_SEED, so the model can
-# be run with several seeds on the same split.
-MODEL_SEED = 42
+# Every model is trained once per seed, and results are reported as mean and standard deviation over these runs
+# (report: Evaluation Protocol). The same seed always gives the same starting weights. Kept separate from SPLIT_SEED,
+# so every seed uses the same split.
+MODEL_SEEDS = [0, 1, 2, 3, 4]
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
 EPOCHS = 50

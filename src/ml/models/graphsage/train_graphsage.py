@@ -59,7 +59,7 @@ def prepare_data():
 
 def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # Trains one GraphSAGE model with the given seed and returns its predictions for every segment, from the epoch with
-    # the best validation macro-F1. Returns predictions, best_epoch, best_f1.
+    # the best validation macro-F1. Returns predictions, best_epoch.
     # The test set is not passed in, so it can never influence training or the choice of epoch.
 
     # The number of features each road segment has, read from the data so it stays correct if features are added.
@@ -140,4 +140,4 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 
-    return predictions, best_epoch, best_f1
+    return predictions, best_epoch

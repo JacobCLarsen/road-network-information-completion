@@ -17,7 +17,7 @@ if __name__ == "__main__":
     graph, train_mask, val_mask, test_mask, class_weights, labels = prepare_data()
 
     # Training and the choice of epoch only use the training and validation sets, exactly as in the development run
-    predictions, best_epoch, best_f1 = train_graphsage(graph, train_mask, val_mask, class_weights, labels, config.MODEL_SEED)
+    predictions, best_epoch = train_graphsage(graph, train_mask, val_mask, class_weights, labels, config.MODEL_SEEDS[0])
 
     # Score the predictions on the test segments with the shared evaluation function
     result = evaluate(graph["y"][test_mask], predictions[test_mask], labels, class_names=ROAD_CLASSES)
