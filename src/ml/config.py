@@ -10,6 +10,10 @@ DATA_DIR = "data/bj_data/map"
 # The labelled segments are split into training, validation and test. The test share is the rest (here 20%).
 TRAIN_SHARE = 0.6
 VAL_SHARE = 0.2
+
+# Graph Splitting Strategy
+STRATEGY = "random"
+
 # The same seed always gives the same split
 SPLIT_SEED = 42
 # The same seed always gives the same starting weights for the model. Kept separate from SPLIT_SEED, so the model can
@@ -18,3 +22,5 @@ MODEL_SEED = 42
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
 EPOCHS = 50
+
+
