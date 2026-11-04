@@ -5,7 +5,10 @@ Train/validation/test split of the road line graph, done with masks over the com
 The model always sees the whole graph (all segments, connections and features). The masks only decide whose
 label is used for training, for model selection (validation) and for the final evaluation (test).
 
-The split sizes come from the config: TRAIN_SHARE and VAL_SHARE are set there, and the test share is the rest.
+By default, everything comes from the config, so every model uses the same split:
+    TRAIN_SHARE, VAL_SHARE:  the sizes of the training and validation sets (the test set gets the rest)
+    SPLIT_STRATEGY:          "random" or "spatial"
+    SPLIT_SEED:              the seed, so the same split comes out every time
 
 Two strategies:
     "random":  Random split of the labeled segments, stratified by road type (every type is split on its own).
@@ -16,19 +19,17 @@ Segments without a label (graph["mask"] is False) are in none of the masks.
 
 Usage:
     from src.ml.data.split_graph import make_split_masks
- 
-    graph = RoadGraphBuilder(segments).get_static_components()      # the builder is used as before
- 
-    masks = make_split_masks(graph, seed=42, strategy="spatial")    # or strategy="random"
-   
-    
-    # Optional: other shares than the config (default TRAIN_SHARE and VAL_SHARE), e.g. in tests:
-    masks = make_split_masks(graph, seed=1, train_share=0.6, val_share=0.2)
+
+    graph = RoadGraphBuilder(segments).get_static_components()
+    masks = make_split_masks(graph)    # uses SPLIT_STRATEGY, SPLIT_SEED, TRAIN_SHARE and VAL_SHARE from the config
+
+    # To use other values than the config, e.g. in tests, pass them in:
+    masks = make_split_masks(graph, seed=1, strategy="spatial", train_share=0.6, val_share=0.2)
 """
 
 import torch
 
-from src.ml.config import TRAIN_SHARE, VAL_SHARE
+from src.ml.config import SPLIT_SEED, SPLIT_STRATEGY, TRAIN_SHARE, VAL_SHARE
 
 SPLIT_NAMES = ("train", "validation", "test")
 
@@ -104,14 +105,14 @@ def _spatial_split(geometry, known, train_share, val_share, test_share, seed, ce
     return masks
 
 
-def make_split_masks(graph, seed=42, strategy="random", stratify=True, cells_per_side=20,
+def make_split_masks(graph, seed=SPLIT_SEED, strategy=SPLIT_STRATEGY, stratify=True, cells_per_side=20,
                      train_share=TRAIN_SHARE, val_share=VAL_SHARE):
     """
     Returns boolean masks {"train", "validation", "test"}, one value per segment of the full graph.
 
     graph:           RoadGraphBuilder, or the dictionary from get_static_components().
-    seed:            The same seed always gives the same split.
-    strategy:        "random" or "spatial".
+    seed:            Defaults to SPLIT_SEED from the config. The same seed always gives the same split.
+    strategy:        "random" or "spatial". Defaults to SPLIT_STRATEGY from the config.
     stratify:        Random strategy only: split every road type separately.
     cells_per_side:  Spatial strategy only: size of the grid. More cells gives a split closer to random.
     train_share,
@@ -126,7 +127,22 @@ def make_split_masks(graph, seed=42, strategy="random", stratify=True, cells_per
     known = static["mask"].bool()
 
     if strategy == "random":
-        return _random_split(y, known, train_share, val_share, seed, stratify)
-    if strategy == "spatial":
-        return _spatial_split(static["geometry"], known, train_share, val_share, test_share, seed, cells_per_side)
-    raise ValueError(f"Unknown strategy '{strategy}'. Use 'random' or 'spatial'.")
+        masks = _random_split(y, known, train_share, val_share, seed, stratify)
+    elif strategy == "spatial":
+        masks = _spatial_split(static["geometry"], known, train_share, val_share, test_share, seed, cells_per_side)
+    else:
+        raise ValueError(f"Unknown strategy '{strategy}'. Use 'random' or 'spatial'.")
+
+    _check_masks(masks, known)
+    return masks
+
+
+def _check_masks(masks, known):
+    """The splits must not overlap, and together they must cover exactly the labeled segments."""
+    overlap = (masks["train"].int() + masks["validation"].int() + masks["test"].int()) > 1
+    if overlap.any():
+        raise AssertionError("A segment is in more than one split.")
+
+    union = masks["train"] | masks["validation"] | masks["test"]
+    if not torch.equal(union, known):
+        raise AssertionError("The splits do not cover exactly the labeled segments.")

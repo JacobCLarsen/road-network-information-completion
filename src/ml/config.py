@@ -7,12 +7,13 @@
 # Folder with the road network shapefile (edges.shp and its companion files)
 DATA_DIR = "data/bj_data/map"
 
-# The labelled segments are split into training, validation and test. The test share is the rest (here 20%).
+# Shares of the labelled segments used for training and validation. The test share is the rest
+# (1 - TRAIN_SHARE - VAL_SHARE).
 TRAIN_SHARE = 0.6
 VAL_SHARE = 0.2
 
-# Graph Splitting Strategy
-STRATEGY = "random"
+# How the labelled segments are split: "random" or "spatial".
+SPLIT_STRATEGY = "random"
 
 # The same seed always gives the same split
 SPLIT_SEED = 42
@@ -22,5 +23,3 @@ MODEL_SEED = 42
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
 EPOCHS = 50
-
-
