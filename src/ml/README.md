@@ -48,9 +48,3 @@ python -m src.ml.models.graphsage.final_testrun_graphsage
 ## Adding a model
 
 Give each model its own folder in `models/` with a model file, a run script and its own config file (e.g. `graphsage_config.py`), like `models/graphsage/`. Use the shared settings from `src/ml/config.py` and score the predictions with `evaluate()` from `src/ml/evaluation.py`, always with the same list of road types, so the results are comparable.
-
-## Status
-
-Still to do for road type prediction:
-
-- GraphSAGE: class weights, early stopping, the label trick and tuning.

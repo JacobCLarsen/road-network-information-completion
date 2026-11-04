@@ -3,13 +3,12 @@
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_recall_fscore_support
 
-# The coarse road categories used for grouped evaluation (report Table 12), following the OSM road hierarchy.
-# The report merges link types into their parent type before evaluating. They are listed here as well, under the
-# category of their parent, so grouped evaluation also works while link types are still separate classes.
-# Road types that are in no category (e.g. "road" or "busway") are left out of grouped evaluation.
+# The coarse road categories used for grouped evaluation (report Table 13), following the OSM road hierarchy.
+# Link types are not listed: the graph builder merges them into their parent type (LINK_ROAD_MAPPINGS).
+# Road types that are in no category are left out of grouped evaluation.
 ROAD_GROUPS = {
-    "highways": ["motorway", "trunk", "motorway_link", "trunk_link"],
-    "main_roads": ["primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"],
+    "highways": ["motorway", "trunk"],
+    "main_roads": ["primary", "secondary", "tertiary"],
     "minor_roads": ["unclassified", "residential", "living_street"],
 }
 

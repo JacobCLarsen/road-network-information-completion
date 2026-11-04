@@ -20,13 +20,11 @@ SPLIT_SEED = 42
 
 # Every model is trained once per seed, and results are printed as mean and standard deviation over these runs.
 # The same seed always gives the same starting weights. Kept separate from SPLIT_SEED, so every seed uses the same split.
-# The seeds are 0, 1, 2, ... up to AMOUNT_OF_SEEDS - 1. Change AMOUNT_OF_SEEDS to use more or fewer seeds. 
+# The seeds are 0, 1, 2, ... up to AMOUNT_OF_SEEDS - 1. Change AMOUNT_OF_SEEDS to use more or fewer seeds.
 # They are fixed numbers, not random ones, so every run gives the same results.
 AMOUNT_OF_SEEDS = 5
-MODEL_SEEDS = []
-for i in range(AMOUNT_OF_SEEDS):
-    MODEL_SEEDS.append(i)
-
+# range(5) gives 0, 1, 2, 3, 4, and list() turns that into [0, 1, 2, 3, 4]
+MODEL_SEEDS = list(range(AMOUNT_OF_SEEDS))
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
 EPOCHS = 50
