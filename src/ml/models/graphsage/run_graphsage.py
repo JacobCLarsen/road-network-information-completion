@@ -6,7 +6,7 @@ from src.ml import config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split import train_val_test_split
-from src.ml.evaluation import evaluate, labels_in_data
+from src.ml.evaluation import evaluate, labels_in_data, majority_class_predictions
 from src.ml.models.graphsage import config as sage_config
 from src.ml.models.graphsage.graphsage import GraphSAGE
 
@@ -91,3 +91,11 @@ if __name__ == "__main__":
     print(f"Validation accuracy: {result['accuracy']:.4f}")
     for name, scores in result["per_class"].items():
         print(f"{name}: precision {scores['precision']:.3f}, recall {scores['recall']:.3f}, F1 {scores['f1']:.3f}")
+
+    # Majority-class baseline: always predict the most frequent training road type, scored on the same validation
+    # segments. A useful model has to beat its macro-F1, even if its accuracy looks reasonable.
+    y_val = graph["y"][val_mask]
+    baseline = evaluate(y_val, majority_class_predictions(graph["y"][train_mask], len(y_val)), labels,
+                        class_names=ROAD_CLASSES)
+    print(f"Baseline validation macro-F1: {baseline['macro_f1']:.4f}")
+    print(f"Baseline validation accuracy: {baseline['accuracy']:.4f}")

@@ -3,7 +3,7 @@
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_recall_fscore_support
 
-# The coarse road categories used for grouped evaluation (report Table 12), following the OSM road hierarchy.
+# The coarse road categories used for grouped evaluation (report Table 13), following the OSM road hierarchy.
 # The report merges link types into their parent type before evaluating. They are listed here as well, under the
 # category of their parent, so grouped evaluation also works while link types are still separate classes.
 # Road types that are in no category (e.g. "road" or "busway") are left out of grouped evaluation.
@@ -103,3 +103,42 @@ def evaluate(y_true, y_pred, labels, class_names=None):
     if class_names is not None:
         result["grouped_macro_f1"] = grouped_macro_f1(y_true, y_pred, class_names)
     return result
+
+
+def majority_class_predictions(y_train, n):
+    """
+    Predictions of the majority-class baseline (report section "Evaluation Protocol"): n copies of the road type that
+    is most frequent among the training labels (residential in the Beijing data). Score them with evaluate() on the
+    same validation or test segments as the models, as a lower bound that a useful model has to beat.
+
+    y_train: True road type index of each training segment (tensor or array). The majority class is taken from the
+             training labels only, so nothing is learned from the validation and test segments.
+    n:       Number of segments to predict, e.g. the number of validation segments
+    """
+    if hasattr(y_train, "cpu"):
+        y_train = y_train.cpu().numpy()
+    majority = np.bincount(np.asarray(y_train)).argmax()
+    return np.full(n, majority)
+
+
+def summarize_runs(results):
+    """
+    Mean and standard deviation of the scalar metrics over several runs with different random seeds. Training is
+    random, so the report compares models by their mean and spread over seeds instead of a single run.
+
+    results: List of dictionaries returned by evaluate(), one per seed
+
+    Returns a dictionary with, for every scalar metric (macro_f1, accuracy and grouped_macro_f1 if present),
+    {"mean": ..., "std": ...}, and for per_class, the same for the F1-score of each road type.
+    """
+    summary = {}
+    for metric in ("macro_f1", "accuracy", "grouped_macro_f1"):
+        if metric in results[0]:
+            values = [result[metric] for result in results]
+            summary[metric] = {"mean": float(np.mean(values)), "std": float(np.std(values))}
+
+    summary["per_class_f1"] = {}
+    for name in results[0]["per_class"]:
+        values = [result["per_class"][name]["f1"] for result in results]
+        summary["per_class_f1"][name] = {"mean": float(np.mean(values)), "std": float(np.std(values))}
+    return summary

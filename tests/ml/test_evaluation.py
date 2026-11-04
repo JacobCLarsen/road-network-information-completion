@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.ml.evaluation import evaluate, grouped_macro_f1, labels_in_data
+from src.ml.evaluation import evaluate, grouped_macro_f1, labels_in_data, majority_class_predictions, summarize_runs
 
 
 def test_labels_in_data_skips_unlabelled_and_missing_types():
@@ -55,3 +55,31 @@ def test_grouped_macro_f1_ignores_mix_ups_within_a_category():
 
     # A residential road predicted as a motorway is a mistake across categories, so the score drops
     assert grouped_macro_f1(y_true, [1, 0, 3, 2, 0], names) < 1.0
+
+
+def test_majority_class_baseline_predicts_most_frequent_training_type():
+    y_train = torch.tensor([2, 2, 0, 2, 1])
+    assert majority_class_predictions(y_train, 3).tolist() == [2, 2, 2]
+
+
+def test_majority_class_baseline_has_low_macro_f1_despite_reasonable_accuracy():
+    # The accuracy paradox from the report: always guessing the frequent type gets 3 of 4 right, but finds no type 1
+    y_true = torch.tensor([0, 0, 0, 1])
+    result = evaluate(y_true, majority_class_predictions(torch.tensor([0, 0, 1]), 4), labels=[0, 1])
+    assert result["accuracy"] == 0.75
+    assert result["per_class"][1]["f1"] == 0.0
+    # Type 0: precision 3/4, recall 1 -> F1 6/7. Type 1: F1 0. So macro-F1 is 3/7, well below the accuracy
+    assert result["macro_f1"] == pytest.approx(3 / 7)
+
+
+def test_summarize_runs_gives_mean_and_std_over_seeds():
+    y_true = torch.tensor([0, 0, 1, 1])
+    runs = [
+        evaluate(y_true, y_true, labels=[0, 1]),
+        evaluate(y_true, torch.tensor([0, 0, 0, 1]), labels=[0, 1]),
+    ]
+    summary = summarize_runs(runs)
+    assert summary["accuracy"]["mean"] == pytest.approx((1.0 + 0.75) / 2)
+    assert summary["accuracy"]["std"] == pytest.approx(0.125)
+    assert summary["per_class_f1"][1]["mean"] == pytest.approx((1.0 + 2 / 3) / 2)
+    assert "grouped_macro_f1" not in summary
