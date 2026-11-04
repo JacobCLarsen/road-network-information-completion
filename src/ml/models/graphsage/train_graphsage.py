@@ -12,7 +12,7 @@ from src.ml import config
 from src.ml.class_weights import compute_class_weights
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
-from src.ml.data.split import train_val_test_split
+from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import graphsage_config as sage_config
 from src.ml.models.graphsage.graphsage_model import GraphSAGE
@@ -40,8 +40,10 @@ def prepare_data():
     # never used for training or evaluation.
     print("Segments:", len(segments), "Labelled:", graph["mask"].sum().item())
 
-    # Split the labelled segments into train, validation and test
-    train_mask, val_mask, test_mask = train_val_test_split(graph["mask"], config.SPLIT_SEED, config.TRAIN_SHARE, config.VAL_SHARE)
+    # Split the labelled segments into train, validation and test. Strategy, seed and shares come from the config, so
+    # every model uses the same split.
+    masks = make_split_masks(graph)
+    train_mask, val_mask, test_mask = masks["train"], masks["validation"], masks["test"]
     print("Train:", train_mask.sum().item(), "Validation:", val_mask.sum().item(), "Test:", test_mask.sum().item())
 
     # Standardise the features, with the mean and standard deviation of the training segments only
