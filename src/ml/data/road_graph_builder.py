@@ -6,7 +6,7 @@ import torch
 # The road types we want to predict. A segment's label is the position of its road type in this list.
 # Link roads are not listed, as they are merged into their parent type (see LINK_ROAD_MAPPINGS).
 ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
-                "residential", "living_street", "bus_guideway"]
+                "residential", "living_street"]
 
 # Values of the oneway tag that mean the road is one-way
 ONEWAY_VALUES = ["yes", "true", "1", "-1"]
@@ -20,7 +20,8 @@ LINK_ROAD_MAPPINGS = {
 }
 
 # Rare road types are removed, as there is not enough data to learn them anyway. They are then just noise
-RARE_ROAD_TYPES = ["road", "escape", "disused", "rest_area", "busway", "raceway", "track", "pedestrian", "service"]
+RARE_ROAD_TYPES = ["road", "escape", "disused", "rest_area", "busway", "raceway",
+                   "track", "pedestrian", "service", "bus_guideway"]
 
 EARTH_RADIUS_M = 6371000.0
 
