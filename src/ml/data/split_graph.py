@@ -19,16 +19,13 @@ Usage:
  
     graph = RoadGraphBuilder(segments).get_static_components()      # the builder is used as before
  
-    masks = make_split_masks(graph, seed=42, strategy="spatial")    # or strategy="random"
-   
-    
-    # Optional: other shares than the config (default TRAIN_SHARE and VAL_SHARE), e.g. in tests:
-    masks = make_split_masks(graph, seed=1, train_share=0.6, val_share=0.2)
+    masks = make_split_masks(graph, seed=42)                        # shares and strategy from the config
+    masks = make_split_masks(graph, seed=42, strategy="random")     # override the strategy for this call
 """
 
 import torch
 
-from src.ml.config import TRAIN_SHARE, VAL_SHARE
+from src.ml.config import TRAIN_SHARE, VAL_SHARE, STRATEGY
 
 SPLIT_NAMES = ("train", "validation", "test")
 
@@ -49,19 +46,16 @@ def _split_counts(count, train_share, val_share):
 def _random_split(y, known, train_share, val_share, seed, stratify):
     generator = torch.Generator().manual_seed(seed)
     masks = _new_masks(y.shape[0])
-
     if stratify:
         groups = [(known & (y == c)).nonzero().flatten() for c in y[known].unique(sorted=True)]
     else:
         groups = [known.nonzero().flatten()]
-
     for indices in groups:
         indices = indices[torch.randperm(len(indices), generator=generator)]
         n_train, n_val, _ = _split_counts(len(indices), train_share, val_share)
         masks["train"][indices[:n_train]] = True
         masks["validation"][indices[n_train:n_train + n_val]] = True
         masks["test"][indices[n_train + n_val:]] = True
-
     return masks
 
 
@@ -73,7 +67,6 @@ def _spatial_split(geometry, known, train_share, val_share, test_share, seed, ce
     masks = _new_masks(known.shape[0])
     if not known.any():
         return masks
-
     # Position of each segment: the mean (longitude, latitude) of its points
     centroids = torch.tensor(
         [(sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)) for pts in geometry],
@@ -86,11 +79,9 @@ def _spatial_split(geometry, known, train_share, val_share, test_share, seed, ce
 
     # The labeled segments in each cell
     cells = [((cell_id == cid) & known).nonzero().flatten() for cid in cell_id[known].unique()]
-
     total = int(known.sum())
     targets = {"train": train_share * total, "validation": val_share * total, "test": test_share * total}
     assigned = {name: 0 for name in SPLIT_NAMES}
-
     generator = torch.Generator().manual_seed(seed)
     for pos in torch.randperm(len(cells), generator=generator).tolist():
         members = cells[pos]
@@ -100,18 +91,15 @@ def _spatial_split(geometry, known, train_share, val_share, test_share, seed, ce
         )
         masks[best][members] = True
         assigned[best] += len(members)
-
     return masks
 
-
-def make_split_masks(graph, seed=42, strategy="random", stratify=True, cells_per_side=20,
+def make_split_masks(graph, seed=42, strategy=STRATEGY, stratify=True, cells_per_side=20,
                      train_share=TRAIN_SHARE, val_share=VAL_SHARE):
     """
     Returns boolean masks {"train", "validation", "test"}, one value per segment of the full graph.
-
     graph:           RoadGraphBuilder, or the dictionary from get_static_components().
     seed:            The same seed always gives the same split.
-    strategy:        "random" or "spatial".
+    strategy:        "random" or "spatial". Defaults to STRATEGY from the config.
     stratify:        Random strategy only: split every road type separately.
     cells_per_side:  Spatial strategy only: size of the grid. More cells gives a split closer to random.
     train_share,
@@ -120,11 +108,9 @@ def make_split_masks(graph, seed=42, strategy="random", stratify=True, cells_per
     if train_share < 0 or val_share < 0 or train_share + val_share > 1 + 1e-9:
         raise ValueError(f"Invalid shares: train={train_share}, val={val_share}. Both must be >= 0 and sum to at most 1.")
     test_share = max(0.0, 1.0 - train_share - val_share)
-
     static = graph.get_static_components() if hasattr(graph, "get_static_components") else graph
     y = static["y"]
     known = static["mask"].bool()
-
     if strategy == "random":
         return _random_split(y, known, train_share, val_share, seed, stratify)
     if strategy == "spatial":
