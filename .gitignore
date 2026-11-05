@@ -22,7 +22,8 @@ htmlcov/
 .pytest_cache/
 
 # vscode
-.vscode
+.vscode/*
+!.vscode/settings.json
 
 # .idea
 .idea
