@@ -1,6 +1,6 @@
 # src/ml/models/random_forest/run_random_forest.py
 
-print("Starting imports...", flush=True)
+print("Starting imports...", flush = True)
 
 """Imports"""
 from src.ml import config
@@ -13,7 +13,7 @@ from src.ml.models.random_forest.random_forest import train_random_forest
 
 """Train and evaluate Random Forest on the Beijing road-network dataset."""
 
-print("Imports completed.", flush=True)
+print("Imports completed.", flush = True)
 
 # Run the training and evaluation pipeline when this file is executed directly.
 if __name__ == "__main__":

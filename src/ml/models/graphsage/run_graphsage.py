@@ -11,7 +11,6 @@ from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import config as sage_config
 from src.ml.models.graphsage.graphsage import GraphSAGE
 
-
 if __name__ == "__main__":
     # Load the Beijing road network and build the line graph (one vertex per road segment)
     loader = ShapefileMapLoader(config.DATA_DIR)
