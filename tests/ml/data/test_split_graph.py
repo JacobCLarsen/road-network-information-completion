@@ -57,9 +57,7 @@ def _call(graph, strategy, seed=42, **kwargs):
     return make_split_masks(graph, seed=seed, strategy=strategy, train_share=TRAIN_SHARE, val_share=VAL_SHARE, **kwargs)
 
 
-# ----------------------------------------------------------------------------------------------------------------
 # Property tests: must hold for every split, both strategies
-# ----------------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strategy", STRATEGIES)
 def test_masks_have_expected_keys_shape_and_type(graph, strategy):
@@ -99,9 +97,7 @@ def test_no_split_is_empty(graph, strategy):
         assert masks[name].sum() > 0
 
 
-# ----------------------------------------------------------------------------------------------------------------
 # Reproducibility
-# ----------------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strategy", STRATEGIES)
 def test_same_seed_gives_same_split(graph, strategy):
@@ -118,13 +114,14 @@ def test_different_seeds_give_different_splits(graph, strategy):
     # A single other seed could coincide by chance in theory, so five are checked
     assert any(not torch.equal(base["train"], other["train"]) for other in others)
 
+
 # Random strategy: shares and stratification
 
 def test_random_split_sizes_match_the_shares(graph):
     masks = _call(graph, "random")
     total = int(graph["mask"].sum())
-    assert abs(int(masks["train"].sum()) - TRAIN * total) <= 6   # at most about one segment of rounding per class
-    assert abs(int(masks["validation"].sum()) - VAL * total) <= 6
+    assert abs(int(masks["train"].sum()) - TRAIN_SHARE * total) <= 6   # at most about one segment of rounding per class
+    assert abs(int(masks["validation"].sum()) - VAL_SHARE * total) <= 6
 
 
 def test_random_split_is_stratified_per_class(graph):
@@ -133,8 +130,8 @@ def test_random_split_is_stratified_per_class(graph):
         n = int((graph["y"] == c).sum())
         n_train = int((masks["train"] & (graph["y"] == c)).sum())
         n_val = int((masks["validation"] & (graph["y"] == c)).sum())
-        assert abs(n_train - TRAIN * n) <= 1
-        assert abs(n_val - VAL * n) <= 1
+        assert abs(n_train - TRAIN_SHARE * n) <= 1
+        assert abs(n_val - VAL_SHARE * n) <= 1
 
 
 def test_random_split_keeps_every_class_in_training(graph):
@@ -157,9 +154,10 @@ def test_spatial_split_sizes_are_close_to_the_shares(grid_graph):
     masks = _call(graph, "spatial", cells_per_side=4)
     total = int(graph["mask"].sum())
     # Whole cells move together (one cell is 6.25 percent here), so the shares are only approximate
-    assert abs(int(masks["train"].sum()) / total - TRAIN) <= 0.15
-    assert abs(int(masks["validation"].sum()) / total - VAL) <= 0.15
-    assert abs(int(masks["test"].sum()) / total - (1 - TRAIN - VAL)) <= 0.15
+    assert abs(int(masks["train"].sum()) / total - TRAIN_SHARE) <= 0.15
+    assert abs(int(masks["validation"].sum()) / total - VAL_SHARE) <= 0.15
+    assert abs(int(masks["test"].sum()) / total - (1 - TRAIN_SHARE - VAL_SHARE)) <= 0.15
+
 
 # Configuration: defaults come from the config, arguments override them
 
@@ -179,7 +177,7 @@ def test_test_share_is_the_remainder(graph):
 
 
 def test_strategy_defaults_to_the_config_value(graph):
-    default = make_split_masks(graph, seed=42, train_share=TRAIN, val_share=VAL)
+    default = make_split_masks(graph, seed=42, train_share=TRAIN_SHARE, val_share=VAL_SHARE)
     explicit = _call(graph, split_graph.SPLIT_STRATEGY)
     for name in SPLITS:
         assert torch.equal(default[name], explicit[name])
@@ -190,17 +188,19 @@ def test_strategy_argument_overrides_the_config(graph):
     spatial_masks = _call(graph, "spatial")
     assert any(not torch.equal(random_masks[name], spatial_masks[name]) for name in SPLITS)
 
+
 # Error handling
 
 def test_unknown_strategy_is_rejected(graph):
     with pytest.raises(ValueError):
-        make_split_masks(graph, strategy="spacial", train_share=TRAIN, val_share=VAL)
+        make_split_masks(graph, strategy="spacial", train_share=TRAIN_SHARE, val_share=VAL_SHARE)
 
 
 @pytest.mark.parametrize("train_share, val_share", [(-0.1, 0.2), (0.5, -0.1), (0.8, 0.3)])
 def test_invalid_shares_are_rejected(graph, train_share, val_share):
     with pytest.raises(ValueError):
         make_split_masks(graph, strategy="random", train_share=train_share, val_share=val_share)
+
 
 # Edge cases
 
@@ -237,6 +237,7 @@ def test_accepts_an_object_with_get_static_components(graph):
     from_dict = _call(graph, "random")
     for name in SPLITS:
         assert torch.equal(from_object[name], from_dict[name])
+
 
 # Integration test with the real graph builder
 
