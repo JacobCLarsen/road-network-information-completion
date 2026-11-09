@@ -7,7 +7,7 @@ from src.ml import config
 from src.ml.models.random_forest import config as forest_config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import ROAD_CLASSES, RoadGraphBuilder
-from src.ml.data.split import train_val_test_split
+from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.random_forest.random_forest import train_random_forest
 
@@ -30,13 +30,11 @@ if __name__ == "__main__":
     graph = graph_builder.get_static_components()
 
     # Use the shared split so all models train and validate on the same segments.
-    # The third returned value is the test mask, which we ignore for now using "_".
-    training_mask, validation_mask, _ = train_val_test_split(
-        graph["mask"],
-        config.SPLIT_SEED,
-        config.TRAIN_SHARE,
-        config.VAL_SHARE,
-    )
+    # The test mask is not used during development.
+    masks = make_split_masks(graph)
+
+    training_mask = masks["train"]
+    validation_mask = masks["validation"]
 
     # Standardize the input features using the mean and standard deviation of training segments only.
     # The training mask identifies these segments, preventing validation and test data from influencing the statistics.
@@ -55,7 +53,7 @@ if __name__ == "__main__":
     classifier = train_random_forest(
         training_features,
         training_labels,
-        random_state = config.MODEL_SEED,
+        random_state = config.MODEL_SEEDS[0],
         n_estimators = forest_config.N_ESTIMATORS,
         max_depth = forest_config.MAX_DEPTH,
         class_weight = forest_config.CLASS_WEIGHT,
@@ -73,6 +71,9 @@ if __name__ == "__main__":
     # Compare the predicted road types with the actual validation labels and calculate the evaluation metrics.
     results = evaluate(validation_labels, predictions, class_indices, class_names = ROAD_CLASSES)
 
+    # 
+
+    """
     # Display the overall validation metrics.
     print(f"Validation macro-F1: {results['macro_f1']:.4f}")
     print(f"Validation grouped macro-F1: {results['grouped_macro_f1']:.4f}")
@@ -91,3 +92,4 @@ if __name__ == "__main__":
     print("Confusion matrix class order:", [ROAD_CLASSES[index] for index in class_indices])
     print("Validation confusion matrix (rows=true, columns=predicted):")
     print(results["confusion_matrix"])
+    """
