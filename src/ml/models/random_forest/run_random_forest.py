@@ -8,7 +8,7 @@ from src.ml.models.random_forest import config as forest_config
 from src.ml.data.file_loader import ShapefileMapLoader
 from src.ml.data.road_graph_builder import ROAD_CLASSES, RoadGraphBuilder
 from src.ml.data.split_graph import make_split_masks
-from src.ml.evaluation import evaluate, labels_in_data
+from src.ml.evaluation import evaluate, labels_in_data, summarize_runs, format_summary
 from src.ml.models.random_forest.random_forest import train_random_forest
 
 """Train and evaluate Random Forest on the Beijing road-network dataset."""
@@ -71,25 +71,8 @@ if __name__ == "__main__":
     # Compare the predicted road types with the actual validation labels and calculate the evaluation metrics.
     results = evaluate(validation_labels, predictions, class_indices, class_names = ROAD_CLASSES)
 
-    # 
+    # Summarize the evaluation results. Currently only one training run is performed.
+    summary = summarize_runs([results])
 
-    """
-    # Display the overall validation metrics.
-    print(f"Validation macro-F1: {results['macro_f1']:.4f}")
-    print(f"Validation grouped macro-F1: {results['grouped_macro_f1']:.4f}")
-    print(f"Validation accuracy: {results['accuracy']:.4f}")
-
-    # Display precision, recall, and F1-score for each road type.
-    for road_type, scores in results["per_class"].items():
-        print(
-            f"{road_type}: "
-            f"precision {scores['precision']:.3f}, "
-            f"recall {scores['recall']:.3f}, " 
-            f"F1 {scores['f1']:.3f}"
-        )
-
-    # Display the confusion matrix and the order of its road-type classes.
-    print("Confusion matrix class order:", [ROAD_CLASSES[index] for index in class_indices])
-    print("Validation confusion matrix (rows=true, columns=predicted):")
-    print(results["confusion_matrix"])
-    """
+    # Format and display the validation metrics using the shared evaluation functionality.
+    print(format_summary(summary, set_name = "Validation"))
