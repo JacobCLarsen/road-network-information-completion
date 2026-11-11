@@ -28,6 +28,12 @@ jobs:
         run: |
           pytest tests/api/ -v --cov=src/api --cov-report=term --cov-report=html
 
+      - name: Run data layer unit tests
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+        run: |
+          pytest tests/db/unit -v --cov=src/db --cov-report=term
+
       - name: Run ML tests
         run: |
           pytest tests/ml/ -v --cov=src/ml --cov-report=term
@@ -44,3 +50,58 @@ jobs:
           echo "Docker image built successfully" >> $GITHUB_STEP_SUMMARY
           echo "Ready to merge!" >> $GITHUB_STEP_SUMMARY
         if: always()
+
+  db-integration-tests:
+    # Data layer tests against a real PostGIS database with the migrations from astep-aau/data,
+    # the repo that owns the schema. The schema drift test fails if src/db/models no longer match.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_DB: data
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d data"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Checkout migrations (astep-aau/data)
+        uses: actions/checkout@v4
+        with:
+          repository: astep-aau/data
+          path: data-repo
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements.txt psycopg2-binary
+
+      - name: Apply migrations
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_DB: data
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: |
+          python data-repo/migrations/apply_migrations.py
+
+      - name: Run data layer integration tests
+        env:
+          DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/data"
+          TEST_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/data"
+        run: |
+          pytest tests/db/integration -v --cov=src/db --cov-report=term

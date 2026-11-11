@@ -1,46 +1,15 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+"""Database access for the API.
+
+The connection itself lives in the shared data layer (src/db), so the API and the ML scripts use the
+same settings. Tables are created by the migrations in the astep-aau/data repo, never by the API.
+"""
+
 from sqlalchemy.orm import declarative_base
-import os
-from dotenv import load_dotenv
 
-# Only load .env file in local development (not in cluster/docker)
-if os.getenv("ENV") != "cluster":
-    load_dotenv()
+from src.db.engine import get_session
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("The DATABASE_URL environment variable is not set. Please set it in your environment or .env file.")
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-
-# Configure engine with PostgreSQL-specific pool settings only for PostgreSQL
-if "sqlite" in DATABASE_URL:
-    engine = create_async_engine(
-        DATABASE_URL,
-        echo=DEBUG,
-        future=True
-    )
-else:
-    engine = create_async_engine(
-        DATABASE_URL,
-        echo=DEBUG,
-        future=True,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=1800
-    )
-
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
-
+# Base for the old `models` schema tables in src/api/tables. They will move to src/db/models.
 Base = declarative_base()
 
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# FastAPI dependency: one session per request, committed when the request succeeds.
+get_db = get_session

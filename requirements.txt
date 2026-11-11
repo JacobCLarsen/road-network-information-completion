@@ -3,6 +3,7 @@ FastAPI
 uvicorn[standard]
 sqlalchemy[asyncio]
 asyncpg
+geoalchemy2
 pydantic
 pydantic-settings
 python-dotenv

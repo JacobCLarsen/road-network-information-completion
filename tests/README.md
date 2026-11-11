@@ -2,6 +2,9 @@
 
 ```
 tests/
+├── db/             # Data layer tests
+│   ├── unit/       # No database needed
+│   └── integration/# Real Postgres, skipped unless TEST_DATABASE_URL is set
 ├── api/            # API tests (in-memory SQLite, no Postgres needed)
 │   ├── conftest.py
 │   ├── unit/       # Service layer with mocked database
@@ -18,6 +21,12 @@ pytest
 # Run only the API tests (what CI runs)
 ```bash
 pytest tests/api/ -v
+```
+
+# Run the data layer tests against your local database
+# (TEST_DATABASE_URL from .env; every test is rolled back, so nothing is changed)
+```bash
+pytest tests/db/ -v
 ```
 
 # Run with coverage report
