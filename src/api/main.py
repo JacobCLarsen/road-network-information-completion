@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from src.api.routes import model_metrics, model_types, model_download, health
-from src.api.database import engine, Base
+from src.db.config import settings
+from src.db.engine import engine, check_database
+from src.db.exceptions import NotFoundError
 from src.api.exceptions import NotFoundException, InvalidUUIDException, ForeignKeyViolationException
 from contextlib import asynccontextmanager
 import logging
@@ -18,11 +20,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create tables if they don't exist
-    logger.info("Application startup - initializing database tables")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables initialized successfully")
+    # Startup: the tables are made by the migrations in the data repo, so we only check that
+    # the database is there and up to date (the API stops with an error if not)
+    if settings.db_check_migrations and not settings.database_url.startswith("sqlite"):
+        logger.info("Application startup - checking the database")
+        await check_database()
+        logger.info("Database is ready")
     yield
     # Shutdown: Close connections
     logger.info("Application shutdown - closing database connections")
@@ -65,6 +68,10 @@ async def foreign_key_violation_handler(request: Request, exc: ForeignKeyViolati
         status_code=400,
         content={"detail": str(exc)}
     )
+
+@app.exception_handler(NotFoundError)
+async def db_not_found_handler(request: Request, exc: NotFoundError):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):

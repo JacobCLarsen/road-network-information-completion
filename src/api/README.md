@@ -83,36 +83,32 @@ src/api/
    pip install -r requirements.txt
    ```
 
-4. **Configure environment**
+4. **Start the database**
 
-   Copy `.env.example` to `.env` and configure:
+   The database (PostGIS) and its migrations live in the [astep-aau/data](https://github.com/astep-aau/data) repo.
+   Clone it next to this repo and start it with Docker:
+   ```bash
+   cd ../data
+   cp .env.example .env
+   docker compose up -d --build        # database + migrations + dataset import
+   ```
+
+5. **Configure environment**
+
    ```bash
    cp .env.example .env
    ```
 
-   Edit `.env`:
+   The defaults in `.env.example` point at the local Docker database:
    ```
-   DATABASE_URL=postgresql+asyncpg://username:password@localhost:5432/attribute_prediction
-   DEBUG=true
+   DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/data
    ```
 
-5. **Setup SSH Tunnel (Required for Local Development)**
-
-   The PostgreSQL database is hosted on the university server and requires an SSH tunnel to connect from local development:
-
+   To use the server database from your machine instead, forward it to a local port and point
+   `DATABASE_URL` at that port (needs cluster access):
    ```bash
-   ssh -L 5432:cs-astep02.srv.aau.dk:30432 username@student.aau.dk -N
+   kubectl port-forward svc/dataset-postgres -n main 5433:5432
    ```
-
-   This forwards local port 5432 to the remote database port 30432. Keep this terminal window open while developing.
-
-   Update your `.env` file to connect through the tunnel:
-   ```
-   DATABASE_URL=postgresql+asyncpg://username:password@localhost:5432/attribute_prediction
-   DEBUG=true
-   ```
-
-   **Note**: Replace `username` and `password` with your actual database credentials.
 
 6. **Run the application**
    ```bash
@@ -150,7 +146,13 @@ For detailed API documentation, run the server and visit `/docs`.
 
 ## Database Schema
 
-### Tables
+The database schema is owned by the migrations in the astep-aau/data repo; the API never creates
+tables. The shared data layer for it is in [src/db](../db/README.md).
+
+> The tables below (`models` schema) are the old API tables. They do not exist in the new database
+> and will be replaced by the `attribute_prediction` tables (`model_run`, `epoch`, `metric`, ...).
+
+### Tables (old)
 
 **model_types**
 - `id` (UUID, PK)
@@ -256,19 +258,23 @@ kubectl apply -f k8s/service.yaml -n cs-25-sw-5-06
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | - | Yes |
+| `DATABASE_URL` | PostgreSQL connection string (`postgresql+asyncpg://...`) | - | Yes |
 | `DEBUG` | Enable SQL query logging | `false` | No |
-| `ENV` | Environment (local/cluster) | `local` | No |
+| `DB_CHECK_MIGRATIONS` | Check on startup that the database has run the expected migration | `true` | No |
+| `ENV` | Environment (local/cluster), sets the log level | `local` | No |
+
+Settings are read from the environment first, then from `.env` (see `src/db/config.py`).
 
 ### Example Configurations
 
 **Local Development:**
 ```bash
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/data
 DEBUG=true
 ```
 
-**Cluster (Kubernetes):**
+**Cluster (Kubernetes):** `DATABASE_URL` comes from the `db-secret` secret (see `k8s/secret.example.yaml`)
+and points at `dataset-postgres.main.svc.cluster.local:5432`, the database service in namespace `main`.
 ```yaml
 env:
   - name: ENV
