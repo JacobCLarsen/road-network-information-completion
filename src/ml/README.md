@@ -13,6 +13,12 @@ src/ml/
 ├── models/
 │   ├── majority/
 │   │   └── run_majority.py     # Majority-class baseline: always predicts the most frequent training road type
+│   ├── mlp/
+│   │   ├── mlp_config.py       # MLP settings (hidden size, dropout, learning rate)
+│   │   ├── mlp_model.py        # The MLP model: same shape as GraphSAGE, but only uses each segment's own features
+│   │   ├── train_mlp.py        # Prepares the data and trains the MLP (used by the two run scripts)
+│   │   ├── dev_run_mlp.py      # Development run: trains the MLP and scores it on the validation set
+│   │   └── final_testrun_mlp.py # Final run: scores the MLP on the test set, only once at the very end
 │   └── graphsage/
 │       ├── graphsage_config.py # GraphSAGE settings (hidden size, dropout, learning rate)
 │       ├── graphsage_model.py  # The GraphSAGE model
@@ -40,6 +46,20 @@ Only once, at the very end, after all settings are chosen on the validation set:
 
 ```bash
 python -m src.ml.models.graphsage.final_testrun_graphsage
+```
+
+## Running the MLP
+
+The MLP is the non-graph counterpart of GraphSAGE: same layers, training loop, class weights and seeds, but it never looks at connected segments. Comparing the two shows how much the graph structure helps.
+
+```bash
+python -m src.ml.models.mlp.dev_run_mlp
+```
+
+Only once, at the very end:
+
+```bash
+python -m src.ml.models.mlp.final_testrun_mlp
 ```
 
 ## Running the majority-class baseline
