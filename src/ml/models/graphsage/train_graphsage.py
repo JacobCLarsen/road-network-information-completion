@@ -110,6 +110,12 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
         # Step: move every weight a little in that direction
         optimizer.step()
 
+        # Only check the validation set every VALIDATE_EVERY epochs (and after the last epoch), since the check runs the
+        # model on the whole graph a second time. The best epoch is then chosen from the checked epochs only.
+        if (epoch + 1) % sage_config.VALIDATE_EVERY != 0 and epoch + 1 != config.EPOCHS:
+            print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}")
+            continue
+
         # Check the model on the validation set after this epoch. Evaluation mode turns dropout off, and gradients are
         # only needed for training, so they are switched off to save memory and time.
         model.eval()
