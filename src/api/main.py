@@ -1,14 +1,16 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from src.api.routes import model_metrics, model_types, model_download, health
-from src.db.config import settings
-from src.db.engine import engine, check_database
-from src.db.exceptions import NotFoundError
-from src.api.exceptions import NotFoundException, InvalidUUIDException, ForeignKeyViolationException
-from contextlib import asynccontextmanager
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from src.api.routes import health, map, runs
+from src.db.config import settings
+from src.db.engine import check_database, engine
+from src.db.exceptions import NotFoundError
 
 # Configure logging
 logging.basicConfig(
@@ -32,7 +34,11 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
     logger.info("Database connections closed")
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="Road-Network-Information-Completion API", lifespan=lifespan)
+
+# Lets a front end on another address (e.g. a dev server on localhost:5173) call the API.
+# The API only reads data, so it is fine to allow every origin.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 # Request logging middleware
 @app.middleware("http")
@@ -48,37 +54,9 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Exception handlers
-@app.exception_handler(NotFoundException)
-async def not_found_handler(request: Request, exc: NotFoundException):
-    return JSONResponse(
-        status_code=404,
-        content={"detail": str(exc) if str(exc) else "Resource not found"}
-    )
-
-@app.exception_handler(InvalidUUIDException)
-async def invalid_uuid_handler(request: Request, exc: InvalidUUIDException):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": str(exc) if str(exc) else "Invalid UUID format"}
-    )
-
-@app.exception_handler(ForeignKeyViolationException)
-async def foreign_key_violation_handler(request: Request, exc: ForeignKeyViolationException):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": str(exc)}
-    )
-
 @app.exception_handler(NotFoundError)
-async def db_not_found_handler(request: Request, exc: NotFoundError):
+async def not_found_handler(request: Request, exc: NotFoundError):
     return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-@app.exception_handler(ValueError)
-async def value_error_handler(request: Request, exc: ValueError):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": f"Invalid input: {str(exc)}"}
-    )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
@@ -89,9 +67,8 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal server error"}
     )
 
-app.include_router(model_types.router)
-app.include_router(model_metrics.router)
-app.include_router(model_download.router)
+app.include_router(runs.router)
+app.include_router(map.router)
 app.include_router(health.router)
 
 # uvicorn src.api.main:app --reload

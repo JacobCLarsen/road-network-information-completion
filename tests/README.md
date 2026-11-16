@@ -5,10 +5,9 @@ tests/
 ├── db/             # Data layer tests
 │   ├── unit/       # No database needed
 │   └── integration/# Real Postgres, skipped unless TEST_DATABASE_URL is set
-├── api/            # API tests (in-memory SQLite, no Postgres needed)
+├── api/            # API tests
 │   ├── conftest.py
-│   ├── unit/       # Service layer with mocked database
-│   └── integration/# Full HTTP endpoint tests
+│   └── integration/# HTTP endpoint tests (map/run routes need TEST_DATABASE_URL, health does not)
 └── ml/             # ML tests (need requirements-ml.txt)
     └── data/
 ```

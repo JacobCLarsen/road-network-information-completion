@@ -99,9 +99,9 @@ jobs:
         run: |
           python data-repo/migrations/apply_migrations.py
 
-      - name: Run data layer integration tests
+      - name: Run data layer and API integration tests
         env:
           DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/data"
           TEST_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/data"
         run: |
-          pytest tests/db/integration -v --cov=src/db --cov-report=term
+          pytest tests/db/integration tests/api -v --cov=src/db --cov=src/api --cov-report=term
