@@ -178,7 +178,7 @@ def test_test_share_is_the_remainder(graph):
 
 def test_strategy_defaults_to_the_config_value(graph):
     default = make_split_masks(graph, seed=42, train_share=TRAIN_SHARE, val_share=VAL_SHARE)
-    explicit = _call(graph, split_graph.SPLIT_STRATEGY)
+    explicit = _call(graph, split_graph.STRATEGY)
     for name in SPLITS:
         assert torch.equal(default[name], explicit[name])
 
