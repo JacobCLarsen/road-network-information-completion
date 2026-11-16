@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from src.api.database import get_db
+from src.db.engine import get_session
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ async def liveness_probe():
     return {"status": "alive"}
 
 @router.get("/ready", status_code=status.HTTP_200_OK)
-async def readiness_probe(db: AsyncSession = Depends(get_db)):
+async def readiness_probe(db: AsyncSession = Depends(get_session)):
     """
     Kubernetes readiness probe - checks if app can accept traffic
     Verifies database connectivity before marking pod as ready

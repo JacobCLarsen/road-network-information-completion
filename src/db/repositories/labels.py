@@ -1,10 +1,15 @@
-from sqlalchemy import delete, insert, select
+import json
+
+from sqlalchemy import delete, func, insert, select
+from sqlalchemy.orm import aliased
 
 from src.db.models import (
     Attribute,
     AttributeClass,
     LabelRule,
+    OsmEdge,
     Partition,
+    Prediction,
     Segment,
     SegmentLabel,
     Split,
@@ -25,6 +30,48 @@ class SegmentRepository(BaseRepository):
         for segment_id, highway in result.all():
             tags[segment_id] = highway
         return tags
+
+    async def get_map_features(self, attribute_id, label_rule_version, run_id=None, bbox=None, only_missing=False,
+                               limit=20000):
+        """Segments for the map as GeoJSON features. Every feature has:
+          - label: the true class name, or None if the segment has no label (a missing value)
+          - predicted: the class the run predicted (only if run_id is given)
+        bbox is (min_lon, min_lat, max_lon, max_lat). only_missing=True gives only the segments without a label."""
+        # attribute_class is used twice (true class and predicted class), so we need two aliases
+        label_class = aliased(AttributeClass)
+        predicted_class = aliased(AttributeClass)
+
+        query = (
+            select(OsmEdge.fid, OsmEdge.name, func.ST_AsGeoJSON(OsmEdge.geometry), label_class.name)
+            .outerjoin(SegmentLabel, (SegmentLabel.segment_id == OsmEdge.fid)
+                       & (SegmentLabel.attribute_id == attribute_id)
+                       & (SegmentLabel.label_rule_version == label_rule_version))
+            .outerjoin(label_class, label_class.class_id == SegmentLabel.class_id)
+            .where(OsmEdge.geometry.is_not(None))
+            .order_by(OsmEdge.fid)
+            .limit(limit)
+        )
+        if run_id is not None:
+            query = (
+                query.add_columns(predicted_class.name)
+                .outerjoin(Prediction, (Prediction.segment_id == OsmEdge.fid) & (Prediction.run_id == run_id))
+                .outerjoin(predicted_class, predicted_class.class_id == Prediction.predicted_class_id)
+            )
+        if bbox is not None:
+            min_lon, min_lat, max_lon, max_lat = bbox
+            # uses the spatial index on osm_edges, so it is fast
+            query = query.where(func.ST_Intersects(OsmEdge.geometry, func.ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat, 4326)))
+        if only_missing:
+            query = query.where(SegmentLabel.segment_id.is_(None))
+
+        result = await self.session.execute(query)
+        features = []
+        for row in result.all():
+            properties = {"segment_id": row[0], "name": row[1], "label": row[3]}
+            if run_id is not None:
+                properties["predicted"] = row[4]
+            features.append({"type": "Feature", "geometry": json.loads(row[2]), "properties": properties})
+        return features
 
 
 class AttributeRepository(BaseRepository):

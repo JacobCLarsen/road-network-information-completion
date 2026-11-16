@@ -1,6 +1,6 @@
 # Road-Network-Information-Completion API Microservice
 
-A FastAPI-based microservice for managing machine learning model metrics and model artifacts for road type prediction. Built for deployment on Kubernetes with automated CI/CD pipelines.
+A FastAPI service that reads the road network database (segments, labels, training runs, metrics and predictions) so a front end can show it. Built for deployment on Kubernetes with automated CI/CD pipelines.
 
 ## Table of Contents
 
@@ -16,16 +16,19 @@ A FastAPI-based microservice for managing machine learning model metrics and mod
 
 ## Overview
 
-This service provides a RESTful API for:
-- Managing ML model types and metadata
-- Storing and retrieving model performance metrics
-- Downloading trained model files
+This service provides a read-only REST API for a web page that shows:
+- A map of the road segments, where the segments without a road type (the missing values) stand out
+- The results of a model run: the predicted road types on the map, the scores and the training curve
+
+The ML scripts write to the database themselves through the repositories in [src/db](../db/README.md).
+The API uses the same repositories to read the data.
 
 ## Features
 
 - **Async FastAPI** - High-performance async API with SQLAlchemy 2.0
 - **PostgreSQL** - Production database with connection pooling
-- **Testing** - Unit + integration tests against in-memory SQLite
+- **Testing** - Endpoint tests against a real Postgres database (rolled back after each test)
+- **CORS** - Any front end can call the API from the browser (GET only)
 - **Health Checks** - Kubernetes liveness/readiness probes with DB validation
 - **Logging** - Structured logging for all operations
 - **CI/CD** - Automated testing, building, and deployment via GitHub Actions
@@ -35,21 +38,16 @@ This service provides a RESTful API for:
 
 ```
 src/api/
-├── main.py                 # FastAPI app with middleware and exception handlers
-├── database.py             # Database engine and session management
-├── routes/                 # API endpoint definitions
-│   ├── model_types.py
-│   ├── model_metrics.py
-│   ├── model_download.py
-│   └── health.py
-├── services/               # Business logic layer
-│   ├── model_type_service.py
-│   ├── model_metric_service.py
-│   └── model_download_service.py
-├── tables/                 # SQLAlchemy ORM tables
-├── schemas/                # Pydantic request/response models
-└── exceptions.py           # Custom exception definitions
+├── main.py                 # FastAPI app with middleware, CORS and exception handlers
+├── schemas.py              # Pydantic response models
+└── routes/                 # API endpoint definitions
+    ├── map.py              # GET /map/... (GeoJSON for the web page)
+    ├── runs.py             # GET /runs/...
+    └── health.py
 ```
+
+The routes get a session with `Depends(get_session)` and use the repositories from `src/db`.
+There is no separate service layer, because the repositories already do the database work.
 
 ## Local Development
 
@@ -122,19 +120,24 @@ src/api/
 
 ## API Documentation
 
-### Model Types
+### Map
 
-- `POST /model-types/create` - Create a new model type
-- `GET /model-types/` - List all model types
+- `GET /map/road-types` - The road type classes (`class_id`, `name`, `category`)
+- `GET /map/missing?run_id=` - All segments without a label as GeoJSON, with `predicted` if `run_id` is given
+- `GET /map/segments?min_lon=&min_lat=&max_lon=&max_lat=&run_id=` - All segments in the box as GeoJSON
+  (at most 20000), with `label` (null if missing) and `predicted`
 
-### Model Metrics
+### Runs
 
-- `POST /model-metrics/create` - Create model metrics
-- `GET /model-metrics/{model_type}` - Get metrics for a model type
+- `GET /runs/` - All training runs, newest first
+- `GET /runs/{run_id}` - One run with its `epochs` (training curve) and `metrics` (scores)
 
-### Downloads
+Example of calling it from a front end:
 
-- `GET /download_model/{model_id}` - Download model file (.pth)
+```js
+const missing = await fetch("http://localhost:8000/map/missing?run_id=1").then(r => r.json());
+const runs = await fetch("http://localhost:8000/runs/").then(r => r.json());
+```
 
 ### Health Checks
 
@@ -147,61 +150,25 @@ For detailed API documentation, run the server and visit `/docs`.
 ## Database Schema
 
 The database schema is owned by the migrations in the astep-aau/data repo; the API never creates
-tables. The shared data layer for it is in [src/db](../db/README.md).
-
-> The tables below (`models` schema) are the old API tables. They do not exist in the new database
-> and will be replaced by the `attribute_prediction` tables (`model_run`, `epoch`, `metric`, ...).
-
-### Tables (old)
-
-**model_types**
-- `id` (UUID, PK)
-- `name` (String, unique)
-
-**model_metrics**
-- `id` (UUID, PK)
-- `model_type` (UUID, FK → model_types)
-- `train_time_min` (Integer)
-- `bias` (Float)
-- `gap` (Float)
-- `path_to_save` (String)
-- `created_at` (Timestamp)
-
-**hyperparams**
-- `id` (UUID, PK)
-- `model_id` (UUID, FK → model_metrics)
-- `param_name` (String)
-- `param_value` (String)
-
-**loss**
-- `id` (UUID, PK)
-- `model_id` (UUID, FK → model_metrics)
-- `type` (String)
-- `loss_value` (Float)
-- `loss_unit` (String)
+tables. The models and repositories for it are in [src/db](../db/README.md).
 
 ## Testing
 
 ### Running Tests
 
 ```bash
-# All tests
+# All API tests
 pytest tests/api/ -v
 
 # With coverage
 pytest tests/api/ --cov=src/api --cov-report=html
-
-# Integration tests only
-pytest tests/api/integration/ -v
-
-# Unit tests only
-pytest tests/api/unit/ -v
 ```
 
 ### Test Structure
 
-- **Unit Tests** (`tests/api/unit/`) - Service layer logic with mocked database
-- **Integration Tests** (`tests/api/integration/`) - Full API endpoint testing with SQLite
+- `test_health_routes.py` - works without Postgres
+- `test_map_routes.py`, `test_run_routes.py` - need `TEST_DATABASE_URL` (skipped without it).
+  They use the rolled back session from `tests/db/integration`, so they do not change your database.
 
 See [tests/README.md](../../tests/README.md) for more details.
 
