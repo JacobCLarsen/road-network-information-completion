@@ -27,4 +27,4 @@ AMOUNT_OF_SEEDS = 5
 MODEL_SEEDS = list(range(AMOUNT_OF_SEEDS))
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
-EPOCHS = 50
+EPOCHS = 200
