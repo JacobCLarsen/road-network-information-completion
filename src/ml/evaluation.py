@@ -12,8 +12,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precisio
 # Road types that are in no category are left out of grouped evaluation.
 ROAD_GROUPS = {
     "highways": ["motorway", "trunk"],
-    "main_roads": ["primary", "secondary", "tertiary"],
-    "minor_roads": ["unclassified", "residential", "living_street"],
+    "main_roads": ["primary", "secondary", "tertiary", "unclassified"],
+    "minor_roads": [ "residential", "living_street"],
 }
 
 
