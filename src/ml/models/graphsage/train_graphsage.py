@@ -73,14 +73,16 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # come before the model is created, because that is when the starting weights are drawn.
     torch.manual_seed(seed)
 
-    # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/graphsage_config.py)
+    # Hidden size, dropout, learning rate and weight decay come from the GraphSAGE config
+    # (src/ml/models/graphsage/graphsage_config.py)
     model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
     # Adam changes the model's weights to lower the loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE,
+                                 weight_decay=sage_config.WEIGHT_DECAY)
 
     # Show what is being trained and with which settings
     print(f"Training GraphSAGE with seed {seed}")
-    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}")
+    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}, weight decay {sage_config.WEIGHT_DECAY}")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
     # best_f1 starts at -1, so the first epoch (with a score of 0 or more) is always saved.
