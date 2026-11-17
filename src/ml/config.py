@@ -28,3 +28,7 @@ MODEL_SEEDS = list(range(AMOUNT_OF_SEEDS))
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
 EPOCHS = 200
+
+# Strength of class weighting: 1.0 uses the original inverse-frequency weights,
+# 0.5 uses their square roots, and 0.0 gives all present road types equal weight.
+CLASS_WEIGHT_POWER = 1.0
