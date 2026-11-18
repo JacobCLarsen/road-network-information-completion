@@ -36,4 +36,4 @@ WEIGHT_DECAY = 0
 # How often the validation set is checked during training: every this many epochs (and after the last epoch). The
 # best epoch is chosen from the checked epochs only. Checking runs the model on the whole graph a second time, so
 # checking less often makes training faster. 1 checks after every epoch.
-VALIDATE_EVERY = 5
+VALIDATE_EVERY = 1
