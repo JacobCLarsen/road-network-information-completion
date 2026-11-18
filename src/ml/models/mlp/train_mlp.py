@@ -48,7 +48,7 @@ def prepare_data():
 
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Counted from the
     # training segments only. The same shared function as GraphSAGE, so both are trained with the same weights.
-    class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES), config.CLASS_WEIGHT_POWER)
+    class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES))
 
     # The road types that occur in the data. Macro-F1 is averaged over these, so road types without any segments do not pull it down.
     labels = labels_in_data(graph["y"], graph["mask"])

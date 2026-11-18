@@ -27,9 +27,4 @@ AMOUNT_OF_SEEDS = 5
 MODEL_SEEDS = list(range(AMOUNT_OF_SEEDS))
 
 # Number of training epochs. Each epoch runs the model on the whole graph once and changes the weights once.
-EPOCHS = 500
-
-# How strongly the class weights in the loss favour rare road types (see src/ml/class_weights.py). 1 gives the full
-# inverse-frequency weights, 0.5 their square root, 0 no weighting. With 1, GraphSAGE predicted rare types far too
-# often (e.g. many residential segments as living_street); 0.5 raised its validation macro-F1 from 0.370 to 0.402.
-CLASS_WEIGHT_POWER = 0.5
+EPOCHS = 200
