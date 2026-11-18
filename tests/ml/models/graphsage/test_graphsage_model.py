@@ -63,6 +63,19 @@ def test_outputs_raw_scores_not_probabilities(straight_road, model):
     assert not (torch.allclose(out.sum(dim=1), torch.ones(4)))
 
 
+# Checks that the same seed gives the same starting weights. The training code fixes the seed before creating the
+# model, and relies on this to make every run with the same seed give the same result.
+def test_same_seed_gives_same_starting_weights():
+    torch.manual_seed(0)
+    first = GraphSAGE(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout=0.5)
+    torch.manual_seed(0)
+    second = GraphSAGE(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout=0.5)
+
+    # zip pairs up the weights of the two models one by one, so each pair can be compared
+    for first_weights, second_weights in zip(first.parameters(), second.parameters()):
+        assert torch.equal(first_weights, second_weights)
+
+
 # Checks that every weight in both layers gets a gradient, so every weight can learn. If a layer were accidentally cut
 # off from the output, its weights would never change during training, and nothing would crash.
 def test_every_weight_gets_a_gradient(straight_road, model):
@@ -117,6 +130,20 @@ def test_dropout_zero_drops_nothing(straight_road):
     assert torch.equal(model(x, edge_index), model(x, edge_index))
 
 
+# Checks that the model looks at the segment itself: changing a segment's features changes its own scores. Each
+# SAGEConv layer has separate weights for the segment itself (lin_r), and this checks they are used.
+def test_own_features_change_output(straight_road, model):
+    x, edge_index = straight_road
+    model.eval()
+    before = model(x, edge_index)
+
+    changed_x = x.clone()
+    changed_x[0] = torch.tensor([1.0, 1.0, 1.0, 1.0])
+    after = model(changed_x, edge_index)
+
+    assert not (torch.equal(before[0], after[0]))
+
+
 # Checks that the model looks at a segment's neighbours, not only at the segment itself
 def test_neighbour_changes_output(straight_road, model):
     x, edge_index = straight_road
@@ -149,3 +176,24 @@ def test_looks_two_steps_away_but_not_three(straight_road, model):
     changed_x = x.clone()
     changed_x[3] = torch.tensor([1.0, 1.0, 1.0, 1.0])
     assert torch.equal(before[0], model(changed_x, edge_index)[0])
+
+
+# Checks that a segment's scores do not depend on unconnected segments being in the data, or on the order of the
+# segments. The real graph has hundreds of thousands of segments in no particular order, so the scores must only depend
+# on the road itself and its connections.
+def test_scores_do_not_depend_on_other_roads_or_order(straight_road, model):
+    x, edge_index = straight_road
+    model.eval()
+    together = model(x, edge_index)
+
+    # Scored together with a second, unconnected copy of the road: segments 4-7. Adding 4 to edge_index gives the
+    # copy's connections, and torch.cat puts them after the first road's.
+    two_roads_x = torch.cat([x, x])
+    two_roads_edges = torch.cat([edge_index, edge_index + 4], dim=1)
+    two_roads = model(two_roads_x, two_roads_edges)
+    assert torch.allclose(two_roads[:4], together)
+
+    # Scored in reverse order: segment 0 becomes 3, 1 becomes 2, and so on. The connections must be renumbered the
+    # same way, which 3 - edge_index does. torch.flip(..., dims=[0]) reverses the rows, so the scores come out reversed.
+    reversed_out = model(torch.flip(x, dims=[0]), 3 - edge_index)
+    assert torch.allclose(torch.flip(reversed_out, dims=[0]), together)
