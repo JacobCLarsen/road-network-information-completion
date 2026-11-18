@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # The newest migration from the data repo (astep-aau/data) that our models are written for.
 # If the database has not run this migration yet, the API will not start.
 # Remember to update this when new migrations are added in the data repo.
-EXPECTED_MIGRATION = "attribute_prediction/0018_metric.sql"
+EXPECTED_MIGRATION = "attribute_prediction/0019_trip_trajectory_id.sql"
 
 
 class Settings(BaseSettings):
