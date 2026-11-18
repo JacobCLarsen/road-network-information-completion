@@ -16,6 +16,9 @@ def compute_class_weights(train_labels, num_classes, power=1.0):
     # train_labels: The labels of the TRAINING segments only. Validation and test labels must never be passed in, so
     #               nothing is learned from them.
     # num_classes:  The number of road types, so every road type gets a weight, also those with no training segments.
+    # power:        How strongly rare road types are favoured. 1 gives the full inverse-frequency weights, 0.5 their
+    #               square root (softer), 0 gives every road type weight 1 (no weighting). Models should pass
+    #               config.CLASS_WEIGHT_POWER, so they all use the same value.
 
     # bincount() counts how many training segments have each label.
     # For example, [0, 0, 2] becomes [2, 0, 1]. minlength ensures
