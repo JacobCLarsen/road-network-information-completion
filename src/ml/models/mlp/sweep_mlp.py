@@ -2,40 +2,53 @@
 
 """Compare MLP hyperparameters using validation results across multiple model seeds."""
 
-"""Imports"""
+# Imports
 import contextlib
 import csv
 import io
 import itertools
 from pathlib import Path
+
 from src.ml import config
+from src.ml.class_weights import compute_class_weights
 from src.ml.data.road_graph_builder import ROAD_CLASSES
 from src.ml.evaluation import evaluate, summarize_runs
 from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.train_mlp import prepare_data, train_mlp
 
-# Select the experiment to run: "hidden_size", "dropout", or "learning_rate".
-SWEEP_NAME = "hidden_size"
+
+# Choose which experiment to run: hidden_size, dropout, learning_rate, or class_weight_power.
+SWEEP_NAME = "class_weight_power"
 
 # Each experiment changes one hyperparameter while keeping the others fixed.
-# After the dropout sweep, replace 0.5 in the learning-rate sweep with the selected value.
+# Update the fixed values using the results from the preceding experiments.
 SWEEPS = {
     "hidden_size": {
         "WORKING_SPACE": [32, 64, 128, 256],
         "DROPOUT": [0.5],
         "LEARNING_RATE": [0.01],
+        "CLASS_WEIGHT_POWER": [1.0],
     },
 
     "dropout": {
         "WORKING_SPACE": [256],
         "DROPOUT": [0.0, 0.2, 0.5, 0.7],
         "LEARNING_RATE": [0.01],
+        "CLASS_WEIGHT_POWER": [1.0],
     },
 
     "learning_rate": {
         "WORKING_SPACE": [256],
-        "DROPOUT": [0.5],  # Update after evaluating the dropout results.
+        "DROPOUT": [0.5],
         "LEARNING_RATE": [0.001, 0.005, 0.01, 0.02],
+        "CLASS_WEIGHT_POWER": [1.0],
+    },
+
+    "class_weight_power": {
+        "WORKING_SPACE": [256],
+        "DROPOUT": [0.5],
+        "LEARNING_RATE": [0.01],
+        "CLASS_WEIGHT_POWER": [0.0, 0.5, 1.0],
     },
 }
 
@@ -49,30 +62,43 @@ def format_score(score):
         return f"{score['mean']:.4f}"
     return f"{score['mean']:.4f} ± {score['std']:.4f}"
 
-
 """Train each configuration, compare validation performance, and save the results."""
 def main():
-    # Check that the experiment uses supported MLP settings with at least one value.
+    # MLP-specific settings belong to mlp_config; class-weight power is shared
+    # with GraphSAGE and the other models, so it belongs to the shared config.
+    setting_modules = {
+        "WORKING_SPACE": mlp_config,
+        "DROPOUT": mlp_config,
+        "LEARNING_RATE": mlp_config,
+        "CLASS_WEIGHT_POWER": config,
+    }
+
+    # Check the names and ensure every setting has at least one value to test.
     for name, values in SWEEP.items():
-        if name not in ("WORKING_SPACE", "DROPOUT", "LEARNING_RATE"):
-            raise ValueError(f"Unknown MLP setting: {name}")
+        if name not in setting_modules:
+            raise ValueError(f"Unknown setting: {name}")
         if not values:
             raise ValueError(f"No values provided for {name}")
 
     # itertools.product() creates every combination of the value lists.
     # The * passes each list as a separate argument.
     # Example:
-    # For the dropout sweep experiment, the combinations are (256, 0.0, 0.01), (256, 0.2, 0.01), and so on.
+    # For the dropout sweep experiment, the combinations are (256, 0.0, 0.01, 1.0),
+    # (256, 0.2, 0.01, 1.0), and so on.
     parameter_names = list(SWEEP)
     configurations = list(itertools.product(*(SWEEP[name] for name in parameter_names)))
 
     # Prepare data once so all configurations use the same split and preprocessing.
     # The unused fourth return value (_) is the test mask; tuning never uses it.
-    graph, train_mask, val_mask, _, class_weights, labels = prepare_data()
+    # The initial class weights are also unused, since we calculate them for each configuration.
+    graph, train_mask, val_mask, _, _, labels = prepare_data()
 
     # getattr() reads settings by their string names, e.g. "WORKING_SPACE".
-    # Save the original values before temporarily changing the imported module.
-    original_settings = {name: getattr(mlp_config, name) for name in parameter_names}
+    # Each setting is read from its corresponding module using setting_modules.
+    # Save the original values before temporarily changing the imported modules.
+    original_settings = {
+        name: getattr(setting_modules[name], name) for name in parameter_names
+    }
     experiment_rows = []
 
     # Run the experiments while ensuring that temporary configuration changes
@@ -80,21 +106,32 @@ def main():
     try:
         # enumerate() provides both the configuration and its position in the list.
         # start=1 makes the numbering begin at 1 instead of 0.
-        # Example: (1, (256, 0.0, 0.01)), (2, (256, 0.2, 0.01)), and so on.
+        # Example: (1, (256, 0.5, 0.01, 0.0)), (2, (256, 0.5, 0.01, 0.5)), and so on.
         for number, values in enumerate(configurations, start=1):
+
             # zip() pairs each parameter name with its corresponding value.
-            # Example: ["WORKING_SPACE", "DROPOUT"] and (256, 0.2)
-            # become ("WORKING_SPACE", 256) and ("DROPOUT", 0.2).
-            # setattr() then changes these settings in memory without editing mlp_config.py.
+            # Example: ["WORKING_SPACE", "CLASS_WEIGHT_POWER"] and (256, 0.5)
+            # become ("WORKING_SPACE", 256) and ("CLASS_WEIGHT_POWER", 0.5).
+            # setattr() then changes these settings in memory without editing the configuration files.
             for name, value in zip(parameter_names, values):
-                setattr(mlp_config, name, value)
+                setattr(setting_modules[name], name, value)
 
             # Create a readable description of the current configuration.
-            # Example: [2/4] WORKING_SPACE=256, DROPOUT=0.2, LEARNING_RATE=0.01
+            # Example: [2/3] WORKING_SPACE=256, DROPOUT=0.5, LEARNING_RATE=0.01, CLASS_WEIGHT_POWER=0.5
             description = ", ".join(
                 f"{name}={value}" for name, value in zip(parameter_names, values)
             )
             print(f"\n[{number}/{len(configurations)}] {description}")
+
+            # Calculate the class weights using the current weighting power.
+            # Power 1.0 uses the original inverse-frequency weights, 0.5 uses their
+            # square roots, and 0.0 gives all present road types equal weight.
+            # Only training labels are used, keeping validation and test labels untouched.
+            class_weights = compute_class_weights(
+                graph["y"][train_mask],
+                len(ROAD_CLASSES),
+                config.CLASS_WEIGHT_POWER,
+            )
 
             # Store one validation result and selected epoch per model seed.
             validation_results = []
@@ -140,6 +177,7 @@ def main():
                 "working_space": mlp_config.WORKING_SPACE,
                 "dropout": mlp_config.DROPOUT,
                 "learning_rate": mlp_config.LEARNING_RATE,
+                "class_weight_power": config.CLASS_WEIGHT_POWER,
                 "epochs": config.EPOCHS,
                 "model_seeds": " ".join(map(str, config.MODEL_SEEDS)),
                 "split_seed": config.SPLIT_SEED,
@@ -161,9 +199,10 @@ def main():
     # The finally block always runs after the try block, even if training fails.
     # This prevents the sweep from leaving temporary hyperparameter values in memory.
     finally:
-        # Restore the original in-memory MLP settings even if an experiment fails.
+        # Restore the original settings in their corresponding modules,
+        # including the shared class-weighting power.
         for name, value in original_settings.items():
-            setattr(mlp_config, name, value)
+            setattr(setting_modules[name], name, value)
 
     # lambda tells sort() to use each row's macro-F1 mean; reverse=True puts the best first.
     experiment_rows.sort(key=lambda row: row["macro_f1_mean"], reverse=True)
@@ -184,8 +223,8 @@ def main():
         # performance and the best epochs selected across the model seeds.
         print(
             f"  hidden={row['working_space']}, dropout={row['dropout']}, "
-            f"lr={row['learning_rate']}: macro-F1 {macro_f1}; "
-            f"best epochs {row['best_epochs']}"
+            f"lr={row['learning_rate']}, power={row['class_weight_power']}: "
+            f"macro-F1 {macro_f1}; best epochs {row['best_epochs']}"
         )
 
     # DictWriter uses the dictionary keys as CSV column names and writes one

@@ -90,7 +90,7 @@ All repositories have the basic CRUD functions: `get(id)`, `get_all(**filters)`,
 
 | Repository | Functions |
 |---|---|
-| `SegmentRepository` | `get_highway_tags` (read only, `get_all()` gives all segments) |
+| `SegmentRepository` | `get_highway_tags`, `get_map_features` (read only, `get_all()` gives all segments) |
 | `AttributeRepository` | `get_by_name`, `get_classes`, `add_class` |
 | `LabelRepository` | `get_labels`, `save_labels`, `get_or_create_rule` |
 | `SplitRepository` | `create_split`, `get_partitions` |

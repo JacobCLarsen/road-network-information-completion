@@ -1,86 +1,44 @@
-import pytest
+"""Fixtures for the API tests.
+
+`client` calls the API like a browser would. The health tests only need that.
+
+`db_client` is for the routes that read our tables. Those tables only exist in Postgres, so these
+tests need TEST_DATABASE_URL (they are skipped without it). They use the same rolled back session as
+the data layer tests in tests/db/integration, so they never change the database.
+"""
+
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import StaticPool
-from httpx import AsyncClient, ASGITransport
-from src.api.database import Base, get_db
+from httpx import ASGITransport, AsyncClient
+
 from src.api.main import app
+from src.db.engine import get_session
 
-# Test database URL (in-memory SQLite)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-
-@pytest_asyncio.fixture
-async def test_engine():
-    """Create test database engine"""
-    from sqlalchemy import event
-    from sqlalchemy.engine import Engine
-
-    # Enable foreign key constraints for SQLite
-    @event.listens_for(Engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, connection_record):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=False
-    )
-
-    # Remove schema from all tables for SQLite compatibility
-    for table in Base.metadata.tables.values():
-        table.schema = None
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    yield engine
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-    await engine.dispose()
+# Reuse the database fixtures from the data layer tests (session, setup, run, ...)
+from tests.db.integration.conftest import (  # noqa: F401
+    TEST_DATABASE_URL,
+    engine,
+    run,
+    segments,
+    session,
+    setup,
+)
 
 
 @pytest_asyncio.fixture
-async def test_db_session(test_engine):
-    """Create test database session"""
-    async_session = async_sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False
-    )
-
-    async with async_session() as session:
-        yield session
-
-
-@pytest_asyncio.fixture
-async def client(test_db_session):
-    """Create test client with overridden database dependency"""
-    async def override_get_db():
-        yield test_db_session
-
-    app.dependency_overrides[get_db] = override_get_db
-
+async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
+
+@pytest_asyncio.fixture
+async def db_client(session):
+    # make the routes use the test session instead of a normal one
+    async def override_get_session():
+        yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
     app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def sample_model_type_data():
-    """Sample model type data for testing"""
-    return {"name": "GraphSAGE"}
-
-
-@pytest.fixture
-def sample_model_type_create():
-    """Sample ModelTypeCreate schema for testing"""
-    from src.api.schemas import ModelTypeCreate
-    return ModelTypeCreate(name="GraphSAGE")
