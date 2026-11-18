@@ -46,20 +46,23 @@ async def test_create_trips(session, segments):
     taxi_ids = await get_taxi_ids(session, DATASET)
     assert taxi_ids == ["a", "b"]
 
-    trips, traversals, skipped = await create_trips_for_taxis(session, DATASET, taxi_ids, first_trip_id=1)
+    # the test database can already have real trips, so we start after the highest trip id
+    first_id = await session.scalar(text("SELECT coalesce(max(trip_id), 0) + 1 FROM attribute_prediction.trip"))
+
+    trips, traversals, skipped = await create_trips_for_taxis(session, DATASET, taxi_ids, first_trip_id=first_id)
     assert (trips, traversals, skipped) == (2, 3, 1)
 
     trip_a = (await session.execute(select(Trip).where(Trip.trajectory_id == "100:a"))).scalar_one()
-    assert trip_a.trip_id == 1
+    assert trip_a.trip_id == first_id
     assert trip_a.start_time == utc(100)
     assert trip_a.end_time == utc(140)  # 135 + 5, the skipped point still counts for the trip time
-    lon = await session.scalar(func.ST_X(Trip.start_pos).select().where(Trip.trip_id == 1))
+    lon = await session.scalar(func.ST_X(Trip.start_pos).select().where(Trip.trip_id == first_id))
     assert lon == 116.2
 
     trip_b = (await session.execute(select(Trip).where(Trip.trajectory_id == "200:b"))).scalar_one()
-    assert trip_b.trip_id == 2
+    assert trip_b.trip_id == first_id + 1
 
-    result = await session.execute(select(Traversal).where(Traversal.trip_id == 1).order_by(Traversal.seq))
+    result = await session.execute(select(Traversal).where(Traversal.trip_id == first_id).order_by(Traversal.seq))
     steps = list(result.scalars().all())
     assert [(s.seq, s.segment_id, s.speed_mps, s.duration_s) for s in steps] == [
         (1, SEGMENT_IDS[0], 10.0, 10.0),

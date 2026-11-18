@@ -4,9 +4,6 @@
 # Settings that belong to one model (and are tuned on the validation set) are in that model's own config file,
 # e.g. src/ml/models/graphsage/graphsage_config.py.
 
-# Folder with the road network shapefile (edges.shp and its companion files)
-DATA_DIR = "data/bj_data/map"
-
 # Shares of the labelled segments used for training and validation. The test share is the rest
 # (1 - TRAIN_SHARE - VAL_SHARE).
 TRAIN_SHARE = 0.6

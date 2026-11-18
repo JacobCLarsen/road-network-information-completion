@@ -7,7 +7,7 @@ Model training for road type prediction.
 ```
 src/ml/
 ├── data/
-│   ├── file_loader.py          # Loads the road network shapefile into road segments
+│   ├── database_loader.py      # Loads the road network and the labels from the database into road segments
 │   ├── road_graph_builder.py   # Builds the line graph (road segments as nodes) and node features
 │   └── split_graph.py          # Splits the labelled segments into train, validation and test, random or spatial (shared by all models)
 ├── models/
@@ -26,13 +26,21 @@ src/ml/
 │       ├── dev_run_graphsage.py        # Development run: trains GraphSAGE and scores it on the validation set
 │       └── final_testrun_graphsage.py  # Final run: scores GraphSAGE on the test set, only once at the very end
 ├── class_weights.py            # Shared class weights for the loss, so rare road types count more
-├── config.py                   # Settings shared by all models (data path, split, epochs)
+├── config.py                   # Settings shared by all models (split, epochs)
 └── evaluation.py               # Shared evaluation: macro-F1, accuracy, per-class and grouped scores
 ```
 
 ## Data
 
-Put the Beijing map from the DRPK dataset in `data/bj_data/map/` (the folder must contain `edges.shp` and its companion files). Training outputs go in `artifacts/`. Both folders are git-ignored.
+The road network and the labels are read from the database (`public.osm_edges` and
+`attribute_prediction.segment_label`), using `DATABASE_URL` from `.env`. Before training, the database
+needs the map from the data repo and the labels, which you make with:
+
+```bash
+python -m src.db.create_road_type_labels
+```
+
+See [src/db/README.md](../db/README.md) for how to set up the database. Training outputs go in `artifacts/`, which is git-ignored.
 
 ## Running GraphSAGE
 

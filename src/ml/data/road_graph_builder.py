@@ -4,24 +4,13 @@ import math
 import torch
 
 # The road types we want to predict. A segment's label is the position of its road type in this list.
-# Link roads are not listed, as they are merged into their parent type (see LINK_ROAD_MAPPINGS).
+# The labels themselves come from the database (made by src/db/create_road_type_labels.py), where link
+# roads are already merged into their parent type, e.g. "primary_link" -> "primary".
 ROAD_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
                 "residential", "living_street"]
 
 # Values of the oneway tag that mean the road is one-way
 ONEWAY_VALUES = ["yes", "true", "1", "-1"]
-
-LINK_ROAD_MAPPINGS = {
-    "motorway_link": "motorway",
-    "trunk_link": "trunk",
-    "primary_link": "primary",
-    "secondary_link": "secondary",
-    "tertiary_link": "tertiary",
-}
-
-# Rare road types are removed, as there is not enough data to learn them anyway. They are then just noise
-RARE_ROAD_TYPES = ["road", "escape", "disused", "rest_area", "busway", "raceway",
-                   "track", "pedestrian", "service", "bus_guideway"]
 
 EARTH_RADIUS_M = 6371000.0
 
@@ -38,16 +27,16 @@ class Segment:
               one ID, and a two-way road has two (one for each direction). The traffic data uses these IDs.
     u, v:     The IDs of the start and end junction.
     points:   The shape of the road as a list of (longitude, latitude) points, from u to v.
-    highway:  The road type, e.g. "residential".
-    oneway:   The oneway tag, e.g. "True" or "False".
+    label:    The road type from the database, e.g. "residential", or None if the segment has no label.
+    oneway:   True if the road is one-way (from the database), or a oneway tag like "yes".
     """
 
-    def __init__(self, edge_ids, u, v, points, highway=None, oneway=None):
+    def __init__(self, edge_ids, u, v, points, label=None, oneway=None):
         self.edge_ids = edge_ids
         self.u = u
         self.v = v
         self.points = points
-        self.highway = highway
+        self.label = label
         self.oneway = oneway
 
 
@@ -209,20 +198,13 @@ class RoadGraphBuilder:
                 assert edge_id not in self.edge_to_segment, f"Edge ID {edge_id} is used by more than one segment"
                 self.edge_to_segment[edge_id] = i
 
-            # If the segment has a valid label, use it, otherwise it is not used in training
-            road_type = segment.highway
-
-            # Merge link roads into their parent type, e.g. "primary_link" -> "primary"
-            if road_type in LINK_ROAD_MAPPINGS:
-                road_type = LINK_ROAD_MAPPINGS[road_type]
-
-            # Rare or unknown road types get label -1 and are masked out
-            if road_type in RARE_ROAD_TYPES or road_type not in classes:
+            # If the segment has a label we use it, otherwise it gets -1 and is not used in training
+            if segment.label in classes:
+                y.append(classes.index(segment.label))
+                mask.append(True)
+            else:
                 y.append(-1)
                 mask.append(False)
-            else:
-                y.append(classes.index(road_type))
-                mask.append(True)
 
             # Add the features
             x.append(compute_raw_features(segment))

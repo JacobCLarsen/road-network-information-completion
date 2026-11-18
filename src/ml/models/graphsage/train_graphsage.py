@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
-from src.ml.data.file_loader import ShapefileMapLoader
+from src.ml.data.database_loader import load_segments
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
@@ -23,19 +23,18 @@ def prepare_data():
     # weights and the road types that occur. Done once, then reused for every seed.
     # Returns graph, train_mask, val_mask, test_mask, class_weights, labels.
 
-    # Load the Beijing road network and build the line graph (one vertex per road segment)
-    loader = ShapefileMapLoader(config.DATA_DIR)
-    segments = loader.get_segments()
+    # Load the Beijing road network and the labels from the database, and build the line graph
+    # (one vertex per road segment)
+    segments = load_segments()
 
     builder = RoadGraphBuilder(segments)
     graph = builder.get_static_components()
 
-    # Every road has a highway tag: in OpenStreetMap, the highway tag is what marks a line as a road, and the map was
-    # made with OSMnx (the u, v, key and osmid fields are its format), which only downloads lines that have one.
-    # Link roads get the label of their parent type. These segments have no label:
+    # The labels come from the database (src/db/create_road_type_labels.py). Link roads get the label of their
+    # parent type. These segments have no label:
     # - Segments with several road types at once (e.g. "['residential', 'tertiary']" or
     #   "['motorway_link', 'primary_link']"), because OSMnx merged road pieces of different types into one edge.
-    # - Segments of a rare road type (RARE_ROAD_TYPES) or any other type that is not in ROAD_CLASSES.
+    # - Segments of a rare road type, or any other type that is not in ROAD_CLASSES.
     # The graph builder gives these segments y = -1 and mask = False: they stay in the graph as neighbours, but are
     # never used for training or evaluation.
     print("Segments:", len(segments), "Labelled:", graph["mask"].sum().item())
