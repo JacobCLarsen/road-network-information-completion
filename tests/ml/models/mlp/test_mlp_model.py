@@ -67,7 +67,11 @@ def test_outputs_raw_scores_not_probabilities(segments, model):
     # Probabilities must sum to 1 for each segment, whereas raw scores do not.
     # sum(dim = 1) adds the road-type scores for each segment, and torch.ones(4)
     # creates four ones for comparison. allclose() allows small rounding differences.
-    assert not torch.allclose(out.sum(dim = 1), torch.ones(4))
+    assert not torch.allclose(out.sum(dim = 1), torch.ones(4)) 
+
+    # NOTE: 
+    # dim = 1: Sums horizontally (across the columns) 
+    # dim = 0: Sums vertically (down the rows)
 
     # The training code uses cross-entropy loss, which already handles the softmax calculation.
     # Applying softmax inside the MLP would therefore be unnecessary and could affect training.
@@ -77,17 +81,16 @@ def test_same_seed_gives_same_starting_weights():
     # Create two independent MLPs using the same random seed.
     # Both models should receive exactly the same initial parameter values.
     torch.manual_seed(0)
-    first = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout=0.5)
+    first = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout = 0.5)
 
     torch.manual_seed(0)
-    second = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout=0.5)
+    second = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout = 0.5)
 
     # parameters() returns the model's trainable weights and biases.
     # zip() pairs each parameter tensor from the first model with the corresponding one from the second.
     # torch.equal() verifies that both tensors contain exactly the same values.
     for first_weights, second_weights in zip(first.parameters(), second.parameters()):
         assert torch.equal(first_weights, second_weights)
-
 
 """Check that the model's trainable parameters receive gradients during backpropagation."""
 def test_every_weight_gets_a_gradient(segments, model):
@@ -110,7 +113,6 @@ def test_every_weight_gets_a_gradient(segments, model):
         # A positive result confirms that at least one parameter value has a nonzero gradient.
         assert weights.grad.abs().sum() > 0, f"{name} has a gradient of only zeros"
 
-
 """Check that the MLP produces identical outputs when evaluated repeatedly."""
 def test_eval_mode_gives_same_output(segments, model):
     # model.eval() disables dropout, making the model's output deterministic.
@@ -119,7 +121,6 @@ def test_eval_mode_gives_same_output(segments, model):
 
     # torch.equal() checks that repeated predictions contain exactly the same values.
     assert torch.equal(model(segments), model(segments))
-
 
 """Check that dropout changes the model's output during training."""
 def test_train_mode_uses_dropout(segments, model):
@@ -131,19 +132,17 @@ def test_train_mode_uses_dropout(segments, model):
     # This verifies that the model actually applies dropout during training.
     assert not torch.equal(model(segments), model(segments))
 
-
 """Check that a dropout probability of zero disables dropout completely."""
 def test_dropout_zero_drops_nothing(segments):
     # Create a separate MLP with dropout set to 0.0.
     # This means no hidden activations should be randomly removed.
     torch.manual_seed(0)
-    model = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout=0.0)
+    model = MLP(ROAD_FEATURES, WORKING_SPACE, ROAD_TYPES, dropout = 0.0)
 
     # Even in training mode, repeated predictions must now be identical.
     # This verifies that the model respects its configured dropout probability.
     model.train()
     assert torch.equal(model(segments), model(segments))
-
 
 """Check that changing a segment's own features changes its predicted scores."""
 def test_own_features_change_output(segments, model):
@@ -161,7 +160,6 @@ def test_own_features_change_output(segments, model):
 
     # The scores for segment 0 should change because its own input features changed.
     assert not torch.equal(before[0], after[0])
-
 
 """Check that changing one segment does not affect predictions for other segments."""
 def test_other_segments_do_not_change_output(segments, model):
@@ -181,7 +179,6 @@ def test_other_segments_do_not_change_output(segments, model):
     for segment in [0, 2, 3]:
         assert torch.equal(before[segment], after[segment]), f"segment {segment} changed"
 
-
 """Check that predictions do not depend on other segments or their ordering."""
 def test_scores_do_not_depend_on_other_segments_or_order(segments, model):
     # Disable dropout so that predictions are not influenced by randomness.
@@ -197,5 +194,5 @@ def test_scores_do_not_depend_on_other_segments_or_order(segments, model):
 
     # torch.flip() reverses the order of the segments along dimension 0 (the rows).
     # After reversing the output rows again, the predictions should match the original results.
-    reversed_out = model(torch.flip(segments, dims=[0]))
-    assert torch.allclose(torch.flip(reversed_out, dims=[0]), together)
+    reversed_out = model(torch.flip(segments, dims = [0]))
+    assert torch.allclose(torch.flip(reversed_out, dims = [0]), together)
