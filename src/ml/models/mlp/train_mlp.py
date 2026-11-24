@@ -53,7 +53,6 @@ def prepare_data():
 
     return graph, train_mask, val_mask, test_mask, class_weights, labels
 
-
 def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
     # Trains one MLP with the given seed and returns its predictions for every segment, from the epoch with the best
     # validation macro-F1. Returns predictions, best_epoch.
