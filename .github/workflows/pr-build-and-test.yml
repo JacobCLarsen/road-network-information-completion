@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -56,7 +56,7 @@ jobs:
         if: always()
 
   db-integration-tests:
-    # Data layer tests against a real PostGIS database with the migrations from astep-aau/data,
+    # Data layer tests against a real PostGIS database with the migrations from astep-aau/Database,
     # the repo that owns the schema. The schema drift test fails if src/db/models no longer match.
     runs-on: ubuntu-latest
 
@@ -77,16 +77,16 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Checkout migrations (astep-aau/data)
-        uses: actions/checkout@v4
+      - name: Checkout migrations (astep-aau/Database)
+        uses: actions/checkout@v7
         with:
-          repository: astep-aau/data
+          repository: astep-aau/Database
           path: data-repo
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
