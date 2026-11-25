@@ -61,25 +61,25 @@ def test_loads_segments_and_builds_the_split(stand_ins):
     stand_ins["split_function"].assert_called_once_with(stand_ins["graph"])
 
 
-# Checks that standardising and the neighbour label features use the training mask only. With the validation or test
-# mask, the features would contain information from the segments the model is scored on.
-def test_feature_steps_use_the_training_mask_only(stand_ins):
+# Checks that standardising uses the training mask only. With the validation or test mask, the features would contain
+# information from the segments the model is scored on.
+def test_standardising_uses_the_training_mask_only(stand_ins):
     train_module.prepare_data()
 
     builder = stand_ins["builder"]
     train_mask = stand_ins["masks"]["train"]
     builder.standardize_features.assert_called_once_with(stand_ins["segments"], train_mask)
-    builder.add_neighbour_label_features.assert_called_once_with(train_mask)
 
 
-# Checks that the returned graph has the x with the neighbour label features. add_neighbour_label_features makes a new
-# x instead of changing the old one, so without graph["x"] = builder.x the model would never see the new columns.
-def test_returned_graph_has_the_neighbour_label_features(stand_ins):
+# Checks that prepare_data does NOT add the neighbour label columns. With group hiding, train_graphsage builds them
+# itself (with a group of training labels hidden each step). If prepare_data also added them, the model would get the
+# columns twice, and the copy from prepare_data would show every training segment its own label through its neighbours.
+def test_neighbour_label_features_are_left_to_training(stand_ins):
     graph, *_ = train_module.prepare_data()
 
+    stand_ins["builder"].add_neighbour_label_features.assert_not_called()
     assert graph is stand_ins["graph"]
-    assert torch.equal(graph["x"], stand_ins["x_with_neighbour_features"])
-    assert graph["x"].shape[1] == 3
+    assert graph["x"].shape[1] == 1
 
 
 # Checks that the masks come back unchanged and in the order the run scripts unpack them: train, validation, test
