@@ -48,6 +48,11 @@ def prepare_data():
     # Standardise the features, with the mean and standard deviation of the training segments only
     builder.standardize_features(segments, train_mask)
 
+    # Add the share of each road type among the neighbours (training labels only). x gets new columns,
+    # so the graph dictionary needs the new x
+    builder.add_neighbour_label_features(train_mask)
+    graph["x"] = builder.x
+
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
     # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
     class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES))

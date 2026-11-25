@@ -39,6 +39,11 @@ if __name__ == "__main__":
     # The training mask identifies these segments, preventing validation and test data from influencing the statistics.
     graph_builder.standardize_features(segments, training_mask)
 
+    # Add the share of each road type among the neighbours (training labels only). x gets new columns,
+    # so the graph dictionary needs the new x
+    graph_builder.add_neighbour_label_features(training_mask)
+    graph["x"] = graph_builder.x
+
     # The Graph Builder stores features and labels as PyTorch tensors (multi-dimensional array).
     # Convert them to NumPy arrays, which are the standard input format for scikit-learn.
     training_features = graph["x"][training_mask].numpy()

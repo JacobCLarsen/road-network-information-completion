@@ -40,7 +40,35 @@ needs the map from the data repo and the labels, which you make with:
 python -m src.db.create_road_type_labels
 ```
 
-See [src/db/README.md](../db/README.md) for how to set up the database. Training outputs go in `artifacts/`, which is git-ignored.
+The traffic features come from the `traversal` table, so run `python -m src.db.create_trips` first as well.
+See [src/db/README.md](../db/README.md) for how to set up the database.
+
+## Features
+
+Every segment gets 18 input features (columns of `x` in the graph builder):
+
+| Column | Feature | From |
+|---|---|---|
+| 0 | log of the length | the map |
+| 1 | curvature (0 = straight) | the map |
+| 2 | one-way (0 or 1, not standardised) | the map |
+| 3 | degree (number of connected segments) | the map |
+| 4 | log(1 + number of traversals) | the taxi trips |
+| 5 | has traffic (0 or 1, not standardised) | the taxi trips |
+| 6 | average speed (m/s) | the taxi trips |
+| 7 | average acceleration when entering the segment (m/s²) | the taxi trips |
+| 8 | standard deviation of the speed (m/s) | the taxi trips |
+| 9 | share of traversals slower than 2 m/s (stopped or crawling) | the taxi trips |
+| 10–17 | share of the neighbours that are training segments of each road type (one column per type in `ROAD_CLASSES`, not standardised) | the training labels |
+
+The traffic of both directions of a two-way road is added together. Only about 44 % of the segments have
+traffic. For the others, speed and acceleration are unknown and get 0 after standardising (the training
+mean), and column 5 tells the model they are missing. Accelerations above 10 m/s² are skipped as GPS noise.
+
+The neighbour labels (columns 10–17) are added after the split by `add_neighbour_label_features`, and only use
+the labels of the training segments, so the validation and test labels are never seen. A segment's own label is
+not used either.
+Loading the traffic takes about a minute, because it goes through all 34 million traversals. Training outputs go in `artifacts/`, which is git-ignored.
 
 ## Running GraphSAGE
 
