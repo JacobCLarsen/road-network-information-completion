@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: road-network-information-completion
-        image: ghcr.io/jacobclarsen/road-network-information-completion:latest
+        image: ghcr.io/astep-aau/road-network-information-completion:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
