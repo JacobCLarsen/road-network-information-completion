@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
 from src.ml.data.database_loader import load_segments
-from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
+from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES, neighbour_label_shares
 from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import graphsage_config as sage_config
@@ -48,10 +48,7 @@ def prepare_data():
     # Standardise the features, with the mean and standard deviation of the training segments only
     builder.standardize_features(segments, train_mask)
 
-    # Add the share of each road type among the neighbours (training labels only). x gets new columns,
-    # so the graph dictionary needs the new x
-    builder.add_neighbour_label_features(train_mask)
-    graph["x"] = builder.x
+    # The neighbour label columns are not added here: train_graphsage() makes them itself, with group hiding
 
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
     # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
@@ -68,14 +65,29 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # the best validation macro-F1. Returns predictions, best_epoch.
     # The test set is not passed in, so it can never influence training or the choice of epoch.
 
-    # The number of features each road segment has, read from the data so it stays correct if features are added.
-    road_features = graph["x"].shape[1]
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
+
+    # With 1 group every training label would be hidden, so the neighbour label columns would always be 0
+    if sage_config.GROUPS < 2:
+        raise ValueError("GROUPS in graphsage_config.py must be at least 2")
+
+    # The input is the normal features plus one column per road type: the share of the neighbours that are training
+    # segments of that road type (see neighbour_label_shares). For validation and the predictions we use ALL the
+    # training labels, which is the real situation: every known label is used to predict the missing ones.
+    full_x = torch.cat([graph["x"], neighbour_label_shares(graph["edge_index"], graph["y"], train_mask, road_types)], dim=1)
+
+    # The number of features each road segment has, read from the data so it stays correct if features are added.
+    road_features = full_x.shape[1]
 
     # Fix the random starting weights and dropout pattern, so every run with this seed gives the same result. This must
     # come before the model is created, because that is when the starting weights are drawn.
     torch.manual_seed(seed)
+
+    # The random groups for group hiding. A separate generator with the same seed, so the groups are the same every
+    # time we train with this seed.
+    generator = torch.Generator().manual_seed(seed)
+    train_indices = train_mask.nonzero().view(-1)
 
     # Hidden size, dropout, learning rate and weight decay come from the GraphSAGE config
     # (src/ml/models/graphsage/graphsage_config.py)
@@ -86,7 +98,7 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
 
     # Show what is being trained and with which settings
     print(f"Training GraphSAGE with seed {seed}")
-    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}, weight decay {sage_config.WEIGHT_DECAY}")
+    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}, weight decay {sage_config.WEIGHT_DECAY}, {sage_config.GROUPS} groups")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
     # best_f1 starts at -1, so the first epoch (with a score of 0 or more) is always saved.
@@ -98,33 +110,50 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
         # Training mode turns dropout on again, after the validation check of the previous epoch turned it off
         model.train()
 
-        # Clear the gradients from the previous epoch. PyTorch adds new gradients to the old ones, so without this
-        # every step would also include the directions of all earlier steps.
-        optimizer.zero_grad()
+        # Group hiding: shuffle the training segments and split them into GROUPS groups of (almost) the same size.
+        # randperm gives the numbers 0 .. n-1 in a random order, and chunk cuts the list into GROUPS pieces.
+        shuffled = train_indices[torch.randperm(len(train_indices), generator=generator)]
+        groups = shuffled.chunk(sage_config.GROUPS)
 
-        # Forward: one row of scores per segment, one score per road type
-        out = model(graph["x"], graph["edge_index"])
-        # Loss: how wrong the scores are, measured on the training segments only (validation and test labels are never
-        # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the others.
-        # An untrained model starts at around ln(number of road types), the loss of guessing all road types equally.
-        # The class weights make mistakes on rare road types count more.
-        loss = F.cross_entropy(out[train_mask], graph["y"][train_mask], weight=class_weights)
-        # Backward: work out for every weight which direction lowers the loss (the gradients)
-        loss.backward()
-        # Step: move every weight a little in that direction
-        optimizer.step()
+        loss_sum = 0.0
+        for group in groups:
+            # Hide the labels of this group: the neighbour label columns are built from the other training labels only.
+            # So the segments in the group don't know their own label, not even through their neighbours, just like
+            # a segment whose label is really missing.
+            known = train_mask.clone()
+            known[group] = False
+            x = torch.cat([graph["x"], neighbour_label_shares(graph["edge_index"], graph["y"], known, road_types)], dim=1)
+
+            # Clear the gradients from the previous step. PyTorch adds new gradients to the old ones, so without this
+            # every step would also include the directions of all earlier steps.
+            optimizer.zero_grad()
+
+            # Forward: one row of scores per segment, one score per road type
+            out = model(x, graph["edge_index"])
+            # Loss: how wrong the scores are, measured on the hidden group only (validation and test labels are never
+            # used for learning). Cross-entropy is low when the correct road type gets a high score compared to the
+            # others. The class weights make mistakes on rare road types count more.
+            loss = F.cross_entropy(out[group], graph["y"][group], weight=class_weights)
+            # Backward: work out for every weight which direction lowers the loss (the gradients)
+            loss.backward()
+            # Step: move every weight a little in that direction
+            optimizer.step()
+            loss_sum = loss_sum + loss.item()
+
+        # The average loss over the groups, only for printing
+        loss = loss_sum / len(groups)
 
         # Only check the validation set every VALIDATE_EVERY epochs (and after the last epoch), since the check runs the
         # model on the whole graph a second time. The best epoch is then chosen from the checked epochs only.
         if (epoch + 1) % sage_config.VALIDATE_EVERY != 0 and epoch + 1 != config.EPOCHS:
-            print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}")
+            print(f"Epoch {epoch + 1}: training loss {loss:.4f}")
             continue
 
         # Check the model on the validation set after this epoch. Evaluation mode turns dropout off, and gradients are
         # only needed for training, so they are switched off to save memory and time.
         model.eval()
         with torch.no_grad():
-            out = model(graph["x"], graph["edge_index"])
+            out = model(full_x, graph["edge_index"])
         # The road type with the highest score is the model's prediction
         predictions = out.argmax(dim=1)
         val_f1 = evaluate(graph["y"][val_mask], predictions[val_mask], labels)["macro_f1"]
@@ -137,7 +166,7 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
             best_epoch = epoch + 1
             best_state = copy.deepcopy(model.state_dict())
 
-        print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
+        print(f"Epoch {epoch + 1}: training loss {loss:.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
         print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")
 
     # Go back to the weights from the best epoch, so the predictions come from the best model and not the last one
@@ -150,7 +179,7 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # The model is already in evaluation mode from the loop, but setting it again keeps this part correct on its own.
     model.eval()
     with torch.no_grad():
-        out = model(graph["x"], graph["edge_index"])
+        out = model(full_x, graph["edge_index"])
     # The road type with the highest score is the model's prediction
     predictions = out.argmax(dim=1)
 

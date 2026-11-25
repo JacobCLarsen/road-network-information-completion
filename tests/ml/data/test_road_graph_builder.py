@@ -13,6 +13,7 @@ from src.ml.data.road_graph_builder import (
     fit_standardizer,
     haversine,
     mean_and_std,
+    neighbour_label_shares,
     standardize,
 )
 
@@ -416,3 +417,26 @@ def test_neighbour_labels_keep_the_other_features(segments):
     builder.add_neighbour_label_features(train_mask)
 
     assert torch.equal(builder.x[:, :10], before)
+
+
+def test_neighbour_label_shares_function(segments):
+    builder = RoadGraphBuilder(segments)
+    known = torch.tensor([True, True, True, False])
+
+    shares = neighbour_label_shares(builder.edge_index, builder.y, known, len(ROAD_CLASSES))
+
+    primary, residential = ROAD_CLASSES.index("primary"), ROAD_CLASSES.index("residential")
+    # segment 2 has neighbours 0, 1 (primary, known) and 3 (not known)
+    assert shares[2, primary].item() == pytest.approx(2 / 3)
+    # segment 3 only has neighbour 2 (residential, known)
+    assert shares[3, residential].item() == 1.0
+
+
+def test_hidden_label_is_not_counted(segments):
+    builder = RoadGraphBuilder(segments)
+    # segment 2 (residential) is hidden, so its neighbour 3 must not see residential
+    known = torch.tensor([True, True, False, False])
+
+    shares = neighbour_label_shares(builder.edge_index, builder.y, known, len(ROAD_CLASSES))
+
+    assert shares[3].tolist() == [0.0] * len(ROAD_CLASSES)

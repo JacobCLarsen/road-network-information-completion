@@ -37,3 +37,12 @@ WEIGHT_DECAY = 0
 # best epoch is chosen from the checked epochs only. Checking runs the model on the whole graph a second time, so
 # checking less often makes training faster. 1 checks after every epoch.
 VALIDATE_EVERY = 1
+
+# Group hiding (the "label trick", Wang et al. 2021, https://arxiv.org/abs/2103.13355).
+# Every training segment is then predicted once per epoch without its own label.
+#
+# More groups: fewer labels hidden at a time (closer to the real situation), but slower, because each group is one
+#              run of the model, so an epoch takes GROUPS runs.
+# Fewer groups: faster, but more labels are hidden, so the shares in training look less like when predicting.
+# Must be at least 2: with 1 group every training label would be hidden, and the shares would always be 0.
+GROUPS = 10
