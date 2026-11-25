@@ -28,4 +28,4 @@ def compute_class_weights(train_labels, num_classes):
     # Fill in the weights for those road types only: number of training segments / (number of road types that occur
     # * segments of this road type). present.sum() counts the True values. The other road types keep weight 0.
     class_weights[present] = len(train_labels) / (present.sum() * counts[present])
-    return class_weights
+    return class_weights.sqrt()
