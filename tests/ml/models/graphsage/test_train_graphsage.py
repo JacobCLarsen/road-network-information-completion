@@ -114,11 +114,12 @@ def test_predicts_all_validation_segments_correctly(small_road_network, monkeypa
 # Returns a dict of lists that fill up during training:
 # - "loss_labels": every label the loss got
 # - "loss_weights": the class weights the loss got, one entry per epoch
+# - "loss_scores": the scores the loss got, one entry per epoch
 # - "evaluate_labels": every label evaluate got
 # - "val_f1s": the validation macro-F1 evaluate computed, one entry per epoch
 @pytest.fixture
 def training_spies(monkeypatch):
-    recorded = {"loss_labels": [], "loss_weights": [], "evaluate_labels": [], "val_f1s": []}
+    recorded = {"loss_labels": [], "loss_weights": [], "loss_scores": [], "evaluate_labels": [], "val_f1s": []}
 
     # The spy for the loss: write down the labels, then compute the real loss.
     # kwargs means keyword arguments: arguments passed by name, like weight=class_weights. In the definition, **kwargs
@@ -130,6 +131,8 @@ def training_spies(monkeypatch):
         recorded["loss_labels"].extend(true_labels.tolist())
         # .get gives None if no weight was passed, instead of an error
         recorded["loss_weights"].append(kwargs.get("weight"))
+        # .detach() takes the scores out of the training, so storing them does not keep the whole computation alive
+        recorded["loss_scores"].append(scores.detach())
         return real_cross_entropy(scores, true_labels, **kwargs)
 
     # The spy for evaluate: write down the labels, then compute the real scores.
@@ -148,6 +151,29 @@ def training_spies(monkeypatch):
     monkeypatch.setattr(train_module, "evaluate", spy_evaluate)
 
     return recorded
+
+
+# Checks that GraphSAGE really uses the connections between segments during training: training on the same graph
+# without any connections gives different scores. This is the opposite of the MLP, which must ignore them. If
+# train_graphsage stopped passing edge_index to the model, GraphSAGE would just be an MLP and the comparison between the
+# two would show nothing.
+# The scores are compared instead of the predictions, because on this small network the feature alone tells the road
+# type, so both runs would likely predict the same.
+def test_connections_change_training(small_road_network, few_epochs, training_spies):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # The same graph with no connections at all: an edge_index with 2 rows and 0 columns
+    no_connections = {**graph, "edge_index": torch.empty((2, 0), dtype=torch.long)}
+    train_graphsage(no_connections, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # loss_scores has 5 entries per run (few_epochs sets EPOCHS to 5), so [0] is the first epoch of the run with
+    # connections and [5] the first epoch of the run without. Same seed, same starting weights: only the connections
+    # differ.
+    scores = training_spies["loss_scores"]
+    assert len(scores) == 10
+    assert not (torch.equal(scores[0], scores[5]))
 
 
 # Checks that the loss gets the class weights in every epoch. Without them nothing crashes, but mistakes on rare road

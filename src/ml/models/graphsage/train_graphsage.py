@@ -55,7 +55,7 @@ def prepare_data():
 
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Without them the
     # model mostly learns residential, which is about half of the segments. Counted from the training segments only.
-    class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES))
+    class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES), config.CLASS_WEIGHT_POWER)
 
     # The road types that occur in the data. Macro-F1 is averaged over these, so road types without any segments do not pull it down.
     labels = labels_in_data(graph["y"], graph["mask"])
@@ -77,14 +77,16 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
     # come before the model is created, because that is when the starting weights are drawn.
     torch.manual_seed(seed)
 
-    # Hidden size, dropout and learning rate come from the GraphSAGE config (src/ml/models/graphsage/graphsage_config.py)
+    # Hidden size, dropout, learning rate and weight decay come from the GraphSAGE config
+    # (src/ml/models/graphsage/graphsage_config.py)
     model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
     # Adam changes the model's weights to lower the loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE,
+                                 weight_decay=sage_config.WEIGHT_DECAY)
 
     # Show what is being trained and with which settings
     print(f"Training GraphSAGE with seed {seed}")
-    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}")
+    print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}, weight decay {sage_config.WEIGHT_DECAY}")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
     # best_f1 starts at -1, so the first epoch (with a score of 0 or more) is always saved.
@@ -111,6 +113,12 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
         loss.backward()
         # Step: move every weight a little in that direction
         optimizer.step()
+
+        # Only check the validation set every VALIDATE_EVERY epochs (and after the last epoch), since the check runs the
+        # model on the whole graph a second time. The best epoch is then chosen from the checked epochs only.
+        if (epoch + 1) % sage_config.VALIDATE_EVERY != 0 and epoch + 1 != config.EPOCHS:
+            print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}")
+            continue
 
         # Check the model on the validation set after this epoch. Evaluation mode turns dropout off, and gradients are
         # only needed for training, so they are switched off to save memory and time.
