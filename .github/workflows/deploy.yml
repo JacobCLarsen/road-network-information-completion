@@ -50,6 +50,8 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: read
+    env:
+      KUBECONFIG: /etc/k3s-kubeconfig
 
     steps:
       - name: Checkout Code
