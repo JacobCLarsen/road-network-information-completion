@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 """Random Forest classifier for road-type prediction"""
 def train_random_forest(
-    training_features, # Input features of the road segments used for training. (e.g. log_length, curvature, one_way, degree)
+    training_features, # Input features of the road segments used for training. (e.g. log_length, curvature, one_way, degree, and the traffic features)
     training_labels,   # Corresponding road-type labels for the training segments.
     *,                 # All following parameters must be provided by name.
     random_state,      # Random seed used to make training reproducible.
