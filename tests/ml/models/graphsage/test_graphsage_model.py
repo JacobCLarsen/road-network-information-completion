@@ -197,3 +197,17 @@ def test_scores_do_not_depend_on_other_roads_or_order(straight_road, model):
     # same way, which 3 - edge_index does. torch.flip(..., dims=[0]) reverses the rows, so the scores come out reversed.
     reversed_out = model(torch.flip(x, dims=[0]), 3 - edge_index)
     assert torch.allclose(torch.flip(reversed_out, dims=[0]), together)
+
+
+# Checks that a segment without any connections still gets normal scores. The real graph has such segments, and
+# averaging over zero neighbours must not give NaN (not a number), which would make the loss NaN and stop all learning.
+def test_segment_without_neighbours_gets_scores(straight_road, model):
+    x, edge_index = straight_road
+    model.eval()
+
+    # Segment 4 is added, but has no connections
+    lonely_x = torch.cat([x, torch.tensor([[4.0, 0.1, 0.0, 0.0]])])
+    out = model(lonely_x, edge_index)
+
+    assert out.shape == (5, ROAD_TYPES)
+    assert torch.isfinite(out).all()
