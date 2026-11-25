@@ -14,6 +14,10 @@ from src.ml.evaluation import labels_in_data
 from src.ml.models.graphsage import graphsage_config as sage_config
 from src.ml.models.graphsage.train_graphsage import train_graphsage
 
+# The tiny test network is missing some road types, so evaluate() warns about it. That warning is tested in
+# tests/ml/test_evaluation.py, so it is hidden here.
+pytestmark = pytest.mark.filterwarnings("ignore:No segments of road type:UserWarning")
+
 
 # A small hand-made road network of 12 segments: two separate roads of 6 segments each.
 #

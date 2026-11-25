@@ -5,6 +5,7 @@
 
 import csv
 import runpy
+import sys
 
 import pytest
 import torch
@@ -13,6 +14,10 @@ import src.ml.models.graphsage.train_graphsage as train_module
 from src.ml.models.graphsage import graphsage_config as sage_config
 
 SWEEP_MODULE = "src.ml.models.graphsage.sweep_graphsage"
+
+# The tiny test graph is missing some road types, so evaluate() warns about it on every run. That warning is tested
+# in tests/ml/test_evaluation.py, so it is hidden here.
+pytestmark = pytest.mark.filterwarnings("ignore:No segments of road type:UserWarning")
 
 
 # 12 segments: 0-5 train, 6-8 validation, 9-11 test. The test segments have road type 7 only, so any use of them shows.
@@ -73,6 +78,9 @@ def test_sweep_finds_best_setting_and_saves_sorted_results(monkeypatch, tmp_path
 
     monkeypatch.setattr(train_module, "train_graphsage", fake_train)
 
+    # runpy warns when the module it runs is already imported (this file imports it above). Removing it from
+    # sys.modules first avoids that, and monkeypatch puts it back after the test.
+    monkeypatch.delitem(sys.modules, SWEEP_MODULE, raising=False)
     runpy.run_module(SWEEP_MODULE, run_name="__main__")
 
     # Every combination is trained with every sweep seed, in order, and no combination twice
@@ -117,6 +125,11 @@ def test_sweep_restores_settings_when_training_fails(monkeypatch, tmp_path, swee
 
     monkeypatch.setattr(train_module, "train_graphsage", fail_training)
 
+    # runpy warns when the module it runs is already imported (this file imports it above). Removing it from
+    # sys.modules first avoids that, and monkeypatch puts it back after the test.
+    monkeypatch.delitem(sys.modules, SWEEP_MODULE, raising=False)
+    # Unlike the test above, the sweep must crash here, so run_module goes inside pytest.raises.
+    # The line above only prepares and should not crash, so it stays outside.
     with pytest.raises(RuntimeError, match="Training failed"):
         runpy.run_module(SWEEP_MODULE, run_name="__main__")
 
