@@ -68,6 +68,14 @@ mean), and column 5 tells the model they are missing. Accelerations above 10 m/s
 The neighbour labels (columns 10–17) are added after the split by `add_neighbour_label_features`, and only use
 the labels of the training segments, so the validation and test labels are never seen. A segment's own label is
 not used either.
+
+GraphSAGE makes the neighbour label columns itself while training, with group hiding (the "label trick" from
+[Wang et al. 2021](https://arxiv.org/abs/2103.13355)). Every epoch the training segments are split into `GROUPS`
+random groups (set in `graphsage_config.py`, default 10). For each group, the columns are built with that group's
+labels hidden, and the loss is only computed on that group. So a training segment never sees its own label through
+its neighbours, just like a segment whose label is really missing. For validation and the predictions, all the
+training labels are used. The MLP and the random forest only see each segment's own row, so they use the columns
+from `add_neighbour_label_features` directly.
 Loading the traffic takes about a minute, because it goes through all 34 million traversals. Training outputs go in `artifacts/`, which is git-ignored.
 
 ## Running GraphSAGE

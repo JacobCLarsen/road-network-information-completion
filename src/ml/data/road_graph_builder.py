@@ -2,6 +2,7 @@
 
 import math
 import torch
+import torch.nn.functional as F
 
 # The road types we want to predict. A segment's label is the position of its road type in this list.
 # The labels themselves come from the database (made by src/db/create_road_type_labels.py), where link
@@ -242,6 +243,41 @@ def compute_traffic_features(segment, stats):
     return features
 
 
+def neighbour_label_shares(edge_index, y, known_mask, num_classes):
+    """
+    Returns a tensor with one row per segment and one column per road type: the share of the segment's
+    neighbours whose label is known (known_mask is True) and is that road type.
+    E.g. if a segment has 4 neighbours and 2 of them are known residential segments, the residential column is 0.5.
+    A segment without neighbours gets all zeros. A segment's own label is never counted, because a segment is not
+    its own neighbour.
+
+    edge_index: The connections (2 rows: from, to). Every connection (a, b) means a is a neighbour of b.
+    y:          The label of every segment (-1 if it has none).
+    known_mask: True for the segments whose label may be used. Must only be True for segments with a label.
+    """
+    num_segments = y.shape[0]
+    sources = edge_index[0]
+    targets = edge_index[1]
+
+    # Only keep the connections that come from a segment with a known label
+    use = known_mask[sources]
+    known_sources = sources[use]
+    known_targets = targets[use]
+
+    # one_hot turns each label into a row like [0, 0, 1, 0, ...], with a 1 at the position of the road type
+    one_hot = F.one_hot(y[known_sources], num_classes).float()
+
+    # index_add_ adds every one-hot row to the row of the segment it points to (the target), so counts[i][c] is
+    # how many known neighbours of segment i have road type c
+    counts = torch.zeros(num_segments, num_classes)
+    counts.index_add_(0, known_targets, one_hot)
+
+    # Divide by the number of neighbours (all of them, also the unknown ones). bincount counts how many
+    # connections go to each segment. clamp(min=1) avoids dividing by 0 for segments without neighbours.
+    degree = torch.bincount(targets, minlength=num_segments).float()
+    return counts / degree.clamp(min=1).unsqueeze(1)
+
+
 def add_to_junction(segments_at_junction, junction, segment_index):
     """Adds a segment to the list of segments at a junction, creating the list if it does not exist yet."""
     if junction not in segments_at_junction:
@@ -387,33 +423,13 @@ class RoadGraphBuilder:
         Call this after standardize_features, and only once. x gets more columns, so it is a new tensor:
         a dictionary from get_static_components must get the new x (graph["x"] = builder.x).
 
+        This is used by the MLP and the random forest. GraphSAGE makes these columns itself while training,
+        with group hiding (see train_graphsage.py), because it also looks at its neighbours' columns.
+
         train_mask: True for the training segments.
         """
-        num_segments = self.x.shape[0]
-        sources = self.edge_index[0].tolist()
-        targets = self.edge_index[1].tolist()
-        is_train = train_mask.tolist()
-        labels = self.y.tolist()
-
-        # counts[i][c] = how many neighbours of segment i are training segments of road type c
-        counts = []
-        for i in range(num_segments):
-            counts.append([0.0] * self.num_classes)
-
-        # every connection (a, b) means a is a neighbour of b
-        for k in range(len(sources)):
-            a = sources[k]
-            b = targets[k]
-            if is_train[a]:
-                counts[b][labels[a]] = counts[b][labels[a]] + 1
-
-        # turn the counts into shares. A segment without neighbours keeps all zeros
-        for i in range(num_segments):
-            if self.degree[i] > 0:
-                for c in range(self.num_classes):
-                    counts[i][c] = counts[i][c] / self.degree[i]
-
-        self.x = torch.cat([self.x, torch.tensor(counts, dtype=torch.float)], dim=1)
+        shares = neighbour_label_shares(self.edge_index, self.y, train_mask, self.num_classes)
+        self.x = torch.cat([self.x, shares], dim=1)
 
     def get_static_components(self):
         """

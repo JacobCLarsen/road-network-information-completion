@@ -11,6 +11,7 @@ from src.ml import config
 from src.ml.class_weights import compute_class_weights
 from src.ml.data.road_graph_builder import ROAD_CLASSES
 from src.ml.evaluation import labels_in_data
+from src.ml.models.graphsage import graphsage_config as sage_config
 from src.ml.models.graphsage.train_graphsage import train_graphsage
 
 
@@ -52,12 +53,15 @@ def small_road_network():
     return graph, train_mask, val_mask, class_weights, labels
 
 
-# Train for 5 epochs instead of the real number, so the tests are fast. monkeypatch resets it after the test.
+# Train for 5 epochs instead of the real number, so the tests are fast, and with 3 groups (2 training segments each,
+# because the network has 6 training segments), so we know how many steps there are. monkeypatch resets both after
+# the test.
 # A test uses this fixture by listing few_epochs as a parameter. The editor greys the parameter out because the test
 # never reads it, but pytest still runs the fixture before the test, and that is what changes EPOCHS.
 @pytest.fixture
 def few_epochs(monkeypatch):
     monkeypatch.setattr(config, "EPOCHS", 5)
+    monkeypatch.setattr(sage_config, "GROUPS", 3)
 
 
 # Checks that training gives one prediction for every segment, also when the graph has unlabelled segments, like the
@@ -150,15 +154,15 @@ def training_spies(monkeypatch):
     return recorded
 
 
-# Checks that the loss gets the class weights in every epoch. Without them nothing crashes, but mistakes on rare road
+# Checks that the loss gets the class weights in every step (one step per group, so 3 per epoch). Without them nothing crashes, but mistakes on rare road
 # types cost as little as mistakes on common ones, so on the real data the model would mostly predict residential.
 def test_loss_uses_class_weights(small_road_network, few_epochs, training_spies):
     graph, train_mask, val_mask, class_weights, labels = small_road_network
 
     train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
 
-    # One entry per epoch, and every one is exactly the class weights that were passed in
-    assert len(training_spies["loss_weights"]) == 5
+    # One entry per group in every epoch (5 epochs * 3 groups), and every one is exactly the class weights passed in
+    assert len(training_spies["loss_weights"]) == 15
     for weights in training_spies["loss_weights"]:
         assert weights is not None
         assert torch.equal(weights, class_weights)
@@ -225,3 +229,69 @@ def test_validation_labels_do_not_leak_into_the_loss(small_road_network, few_epo
     # The validation segment's road type was not used for learning, but was used for choosing the epoch
     assert 3 not in training_spies["loss_labels"]
     assert 3 in training_spies["evaluate_labels"]
+
+
+# Group hiding
+
+# A spy for neighbour_label_shares: writes down the known mask of every call, then computes the real shares.
+@pytest.fixture
+def known_masks(monkeypatch):
+    recorded = []
+    real_shares = train_module.neighbour_label_shares
+
+    def spy_shares(edge_index, y, known_mask, num_classes):
+        recorded.append(known_mask.clone())
+        return real_shares(edge_index, y, known_mask, num_classes)
+
+    monkeypatch.setattr(train_module, "neighbour_label_shares", spy_shares)
+    return recorded
+
+
+# Checks that every epoch hides every training segment exactly once. The first call is for validation and the
+# predictions and uses all training labels. After that there are 3 calls per epoch, one per group.
+def test_every_training_segment_is_hidden_once_per_epoch(small_road_network, few_epochs, known_masks):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    assert torch.equal(known_masks[0], train_mask)
+    assert len(known_masks) == 1 + 5 * 3
+    for epoch in range(5):
+        hidden_count = torch.zeros(len(train_mask), dtype=torch.long)
+        for known in known_masks[1 + epoch * 3: 1 + (epoch + 1) * 3]:
+            # the hidden segments in this step: training segments that are not known
+            hidden = train_mask & ~known
+            assert hidden.sum().item() == 2
+            hidden_count = hidden_count + hidden.long()
+        # every training segment hidden exactly once, and nothing else ever hidden
+        assert torch.equal(hidden_count, train_mask.long())
+
+
+# Checks that the neighbour label columns only ever use training labels, never validation or test labels.
+def test_neighbour_labels_only_use_training_labels(small_road_network, few_epochs, known_masks):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    for known in known_masks:
+        # known must be a subset of the training segments
+        assert not (known & ~train_mask).any()
+
+
+# Checks that the loss is only computed on the hidden group, so a segment is never trained on while its own
+# label is in the input.
+def test_loss_only_on_the_hidden_group(small_road_network, few_epochs, known_masks, training_spies):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # 2 labels per step (the hidden group), 15 steps
+    assert len(training_spies["loss_labels"]) == 2 * 15
+
+
+def test_groups_must_be_at_least_two(small_road_network, few_epochs, monkeypatch):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+    monkeypatch.setattr(sage_config, "GROUPS", 1)
+
+    with pytest.raises(ValueError, match="GROUPS"):
+        train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
