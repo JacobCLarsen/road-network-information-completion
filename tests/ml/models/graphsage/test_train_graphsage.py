@@ -117,12 +117,13 @@ def test_predicts_all_validation_segments_correctly(small_road_network, monkeypa
 # get and then call the real function.
 # Returns a dict of lists that fill up during training:
 # - "loss_labels": every label the loss got
-# - "loss_weights": the class weights the loss got, one entry per epoch
+# - "loss_weights": the class weights the loss got, one entry per group step
+# - "loss_scores": the scores the loss got, one entry per group step
 # - "evaluate_labels": every label evaluate got
 # - "val_f1s": the validation macro-F1 evaluate computed, one entry per epoch
 @pytest.fixture
 def training_spies(monkeypatch):
-    recorded = {"loss_labels": [], "loss_weights": [], "evaluate_labels": [], "val_f1s": []}
+    recorded = {"loss_labels": [], "loss_weights": [], "loss_scores": [], "evaluate_labels": [], "val_f1s": []}
 
     # The spy for the loss: write down the labels, then compute the real loss.
     # kwargs means keyword arguments: arguments passed by name, like weight=class_weights. In the definition, **kwargs
@@ -134,6 +135,8 @@ def training_spies(monkeypatch):
         recorded["loss_labels"].extend(true_labels.tolist())
         # .get gives None if no weight was passed, instead of an error
         recorded["loss_weights"].append(kwargs.get("weight"))
+        # .detach() takes the scores out of the training, so storing them does not keep the whole computation alive
+        recorded["loss_scores"].append(scores.detach())
         return real_cross_entropy(scores, true_labels, **kwargs)
 
     # The spy for evaluate: write down the labels, then compute the real scores.
@@ -152,6 +155,29 @@ def training_spies(monkeypatch):
     monkeypatch.setattr(train_module, "evaluate", spy_evaluate)
 
     return recorded
+
+
+# Checks that GraphSAGE really uses the connections between segments during training: training on the same graph
+# without any connections gives different scores. This is the opposite of the MLP, which must ignore them. If
+# train_graphsage stopped passing edge_index to the model, GraphSAGE would just be an MLP and the comparison between the
+# two would show nothing.
+# The scores are compared instead of the predictions, because on this small network the feature alone tells the road
+# type, so both runs would likely predict the same.
+def test_connections_change_training(small_road_network, few_epochs, training_spies):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # The same graph with no connections at all: an edge_index with 2 rows and 0 columns
+    no_connections = {**graph, "edge_index": torch.empty((2, 0), dtype=torch.long)}
+    train_graphsage(no_connections, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # loss_scores has one entry per group step, so 15 per run (few_epochs sets 5 epochs and 3 groups). [0] is the
+    # first step of the run with connections and [15] the first step of the run without. Same seed, same starting
+    # weights and same groups: only the connections differ.
+    scores = training_spies["loss_scores"]
+    assert len(scores) == 30
+    assert not (torch.equal(scores[0], scores[15]))
 
 
 # Checks that the loss gets the class weights in every step (one step per group, so 3 per epoch). Without them nothing crashes, but mistakes on rare road
@@ -295,3 +321,96 @@ def test_groups_must_be_at_least_two(small_road_network, few_epochs, monkeypatch
 
     with pytest.raises(ValueError, match="GROUPS"):
         train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+
+# Checks that train_graphsage reads its settings from graphsage_config when it is called, not hard-coded values. The
+# sweep relies on this: it changes graphsage_config between runs and expects the next model to use the new values.
+def test_training_uses_current_graphsage_settings(small_road_network, monkeypatch):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+    monkeypatch.setattr(config, "EPOCHS", 1)
+    monkeypatch.setattr(sage_config, "WORKING_SPACE", 11)
+    monkeypatch.setattr(sage_config, "DROPOUT", 0.3)
+    monkeypatch.setattr(sage_config, "LEARNING_RATE", 0.003)
+    monkeypatch.setattr(sage_config, "WEIGHT_DECAY", 1e-4)
+
+    # Spies on the model and the optimiser: write down the settings, then create the real ones
+    real_model = train_module.GraphSAGE
+    real_adam = torch.optim.Adam
+    model_settings = []
+    optimizer_settings = []
+
+    def spy_model(road_features, working_space, road_types, dropout):
+        model_settings.append((road_features, working_space, road_types, dropout))
+        return real_model(road_features, working_space, road_types, dropout)
+
+    def spy_adam(parameters, **kwargs):
+        optimizer_settings.append((kwargs["lr"], kwargs["weight_decay"]))
+        return real_adam(parameters, **kwargs)
+
+    monkeypatch.setattr(train_module, "GraphSAGE", spy_model)
+    monkeypatch.setattr(torch.optim, "Adam", spy_adam)
+
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # The model gets the normal features plus one neighbour label column per road type
+    assert model_settings == [(graph["x"].shape[1] + len(ROAD_CLASSES), 11, len(ROAD_CLASSES), 0.3)]
+    assert optimizer_settings == [(0.003, 1e-4)]
+
+
+# Checks that with VALIDATE_EVERY = 2 the validation set is only checked after epochs 2 and 4, and after the last
+# epoch (5) even though 5 is not a multiple of 2. Without the last check, the last epochs could never be chosen.
+def test_validates_every_n_epochs_and_after_the_last(small_road_network, few_epochs, training_spies, monkeypatch):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+    monkeypatch.setattr(sage_config, "VALIDATE_EVERY", 2)
+
+    _, best_epoch = train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    # Training still runs every epoch (3 group steps each), only the check is skipped
+    assert len(training_spies["loss_weights"]) == 5 * 3
+    assert len(training_spies["val_f1s"]) == 3
+    # The best epoch can only be one of the checked epochs
+    checked_epochs = [2, 4, 5]
+    assert best_epoch == checked_epochs[training_spies["val_f1s"].index(max(training_spies["val_f1s"]))]
+
+
+# Checks that the returned predictions come from the best epoch, not the last one. On the small network the real
+# validation macro-F1 only goes up, so here evaluate is replaced by a stand-in that scores the epochs the other way
+# round: the first epoch gets the highest score and every later epoch a lower one, so the best epoch is epoch 1.
+# The predictions would be the same at every epoch on this small network, so the scores are compared instead: a spy on
+# the model writes down its scores every time it runs in evaluation mode. The scores after training must be exactly
+# the scores of epoch 1, which only happens if the weights of the best epoch were loaded back.
+def test_predictions_come_from_the_best_epoch(small_road_network, monkeypatch):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+    monkeypatch.setattr(config, "EPOCHS", 5)
+
+    checked = []
+
+    def reversed_evaluate(true_labels, predictions, *args, **kwargs):
+        checked.append(True)
+        # 1.0 for the first epoch, then lower and lower
+        return {"macro_f1": 1.0 - len(checked) / 100}
+
+    monkeypatch.setattr(train_module, "evaluate", reversed_evaluate)
+
+    # The model's scores every time it runs in evaluation mode: once per epoch, then once more after training
+    eval_scores = []
+    real_model = train_module.GraphSAGE
+
+    def spy_model(*args):
+        model = real_model(*args)
+        # A forward hook runs after every call of the model and gets its output
+        model.register_forward_hook(
+            lambda module, inputs, output: None if module.training else eval_scores.append(output.detach().clone()))
+        return model
+
+    monkeypatch.setattr(train_module, "GraphSAGE", spy_model)
+
+    predictions, best_epoch = train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0)
+
+    assert best_epoch == 1
+    # 5 epochs plus the run after training
+    assert len(eval_scores) == 6
+    first_epoch, last_epoch, after_training = eval_scores[0], eval_scores[-2], eval_scores[-1]
+    assert torch.equal(after_training, first_epoch)
+    assert not torch.equal(after_training, last_epoch)
+    assert torch.equal(predictions, after_training.argmax(dim=1))
