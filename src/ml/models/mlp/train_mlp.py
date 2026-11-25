@@ -3,11 +3,10 @@
 # Prepares the data and trains the MLP. Used by dev_run_mlp.py (scored on the validation set during development) and
 # final_testrun_mlp.py (scored on the test set once, at the end).
 
+"""Imports"""
 import copy
-
 import torch
 import torch.nn.functional as F
-
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
 from src.ml.data.file_loader import ShapefileMapLoader
@@ -16,7 +15,6 @@ from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.mlp_model import MLP
-
 
 def prepare_data():
     # Everything that is the same for every training run: the graph, the split, the standardised features, the class
@@ -54,7 +52,6 @@ def prepare_data():
     labels = labels_in_data(graph["y"], graph["mask"])
 
     return graph, train_mask, val_mask, test_mask, class_weights, labels
-
 
 def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
     # Trains one MLP with the given seed and returns its predictions for every segment, from the epoch with the best

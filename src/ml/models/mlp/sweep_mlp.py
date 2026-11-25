@@ -8,14 +8,12 @@ import csv
 import io
 import itertools
 from pathlib import Path
-
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
 from src.ml.data.road_graph_builder import ROAD_CLASSES
 from src.ml.evaluation import evaluate, summarize_runs
 from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.train_mlp import prepare_data, train_mlp
-
 
 # Choose which experiment to run: hidden_size, dropout, learning_rate, or class_weight_power.
 SWEEP_NAME = "class_weight_power"
