@@ -52,9 +52,27 @@ Run it once on every new database (it is safe to run again):
 python -m src.db.create_road_type_labels
 ```
 
-It uses the same rule as the ML code: the highway tag, with link roads merged into their parent
-type. Segments with other tags get no label. The class ids are made by the database, so they are
+The ML code trains on these labels (`src/ml/data/database_loader.py` reads them). The rule is the
+highway tag, with link roads merged into their parent type. Segments with other tags get no label. The class ids are made by the database, so they are
 not the same as the index in `ROAD_CLASSES`. Always look classes up by name.
+
+## Trips
+
+The `trip` and `traversal` tables are made from the raw taxi data in `public.trajectories` by a
+script. Run it after the trajectories are imported (it is safe to run again, old trips are deleted):
+
+```bash
+python -m src.db.create_trips
+```
+
+- One trajectory becomes one `trip`. `trip.trajectory_id` is the id of the raw row.
+- Each road point `[segment_id, enter_time, speed_mps, duration_s]` becomes one `traversal`.
+  Points with a segment that is not in the map are skipped.
+- Trip ids are 1, 2, 3, ... sorted by taxi and trajectory, so the same data gives the same ids.
+- It only uses `traj_train_100` (see `DATASET` in the script). The other train files are smaller copies of it.
+
+It needs the migration `attribute_prediction/0019_trip_trajectory_id.sql` from the data repo.
+The ML code reads the map from the `segment` view, which needs `attribute_prediction/0020_segment_key.sql`.
 
 ## How to use it
 

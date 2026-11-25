@@ -36,6 +36,7 @@ class OsmEdge(Base):
 class Segment(Base):
     # This is a VIEW (read only) on top of osm_edges with nicer column names.
     # segment_id is the same as osm_edges.fid. u and v are the ids of the start and end node.
+    # key separates two different roads that have the same u and v.
     __tablename__ = "segment"
     __table_args__ = {"schema": SCHEMA, "info": {"is_view": True}}
 
@@ -52,3 +53,4 @@ class Segment(Base):
     name: Mapped[str | None] = mapped_column(Text)
     bridge: Mapped[str | None] = mapped_column(Text)
     tunnel: Mapped[str | None] = mapped_column(Text)
+    key: Mapped[int | None] = mapped_column(BigInteger)

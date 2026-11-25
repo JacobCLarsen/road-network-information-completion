@@ -3,8 +3,8 @@
 It is safe to run more than once. Existing classes are kept and the labels of label rule
 version 1 are deleted and saved again.
 
-The rule is the same as in the ML code (src/ml/data/road_graph_builder.py), so the labels in the
-database are the same as the ones we train on:
+The ML code reads these labels from the database (src/ml/data/database_loader.py), so this is the
+rule for the labels we train on:
   - the label is the highway tag of the segment
   - link roads are merged into their parent type, e.g. "primary_link" becomes "primary"
   - all other tags (rare types, or segments with more than one tag) get no label
@@ -20,8 +20,8 @@ from src.db.repositories import AttributeRepository, LabelRepository, SegmentRep
 LABEL_RULE_VERSION = 1
 LABEL_RULE_DESCRIPTION = "highway tag, link roads merged into parent type, other tags not labelled"
 
-# Copied from src/ml/data/road_graph_builder.py (ROAD_CLASSES and LINK_ROAD_MAPPINGS) and
-# src/ml/evaluation.py (ROAD_GROUPS).
+# The names must be the same as ROAD_CLASSES in src/ml/data/road_graph_builder.py, and the categories
+# the same as ROAD_GROUPS in src/ml/evaluation.py.
 ROAD_CLASSES = {
     "motorway": "highways",
     "trunk": "highways",

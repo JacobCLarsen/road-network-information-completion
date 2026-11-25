@@ -2,13 +2,14 @@ import math
 import pytest
 import torch
 from src.ml.data.road_graph_builder import (
-    LINK_ROAD_MAPPINGS,
-    RARE_ROAD_TYPES,
     ROAD_CLASSES,
     RoadGraphBuilder,
     Segment,
     compute_features,
     compute_raw_features,
+    compute_raw_traffic_features,
+    compute_traffic_features,
+    fit_traffic_standardizer,
     fit_standardizer,
     haversine,
     mean_and_std,
@@ -31,13 +32,13 @@ def segments():
                |
                + -- 5          segment 2 (residential, two-way), bends on the way to 5
                     |
-                    6          segment 3 (no highway tag)
+                    6          segment 3 (no label)
     """
     return [
-        Segment(edge_ids=[10], u=1, v=2, points=[A, B], highway="primary", oneway="True"),
-        Segment(edge_ids=[11], u=2, v=3, points=[B, C], highway="primary", oneway="True"),
-        Segment(edge_ids=[20, 21], u=2, v=5, points=[B, BEND, D], highway="residential", oneway="False"),
-        Segment(edge_ids=[30], u=5, v=6, points=[D, E], highway=None, oneway=None),
+        Segment(edge_ids=[10], u=1, v=2, points=[A, B], label="primary", oneway="True"),
+        Segment(edge_ids=[11], u=2, v=3, points=[B, C], label="primary", oneway="True"),
+        Segment(edge_ids=[20, 21], u=2, v=5, points=[B, BEND, D], label="residential", oneway="False"),
+        Segment(edge_ids=[30], u=5, v=6, points=[D, E], label=None, oneway=None),
     ]
 
 
@@ -61,16 +62,9 @@ def test_labels_and_mask(segments):
     assert builder.mask.tolist() == [True, True, True, False]
 
 
-def test_multiple_road_types_are_unlabelled():
-    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="['residential', 'tertiary']")
-    builder = RoadGraphBuilder([seg])
-    assert builder.y.tolist() == [-1]
-    assert builder.mask.tolist() == [False]
-
-
 def test_features(segments):
     builder = RoadGraphBuilder(segments)
-    assert builder.x.shape == (4, 4)
+    assert builder.x.shape == (4, 10)
 
     # Straight segment: no curvature, oneway
     straight = builder.x[0]
@@ -109,7 +103,7 @@ def test_parallel_segments_are_connected_once():
 
 
 def test_loop_segment_is_not_connected_to_itself():
-    loop = Segment(edge_ids=[1], u=1, v=1, points=[A, B, BEND, A], highway="service")
+    loop = Segment(edge_ids=[1], u=1, v=1, points=[A, B, BEND, A], label=None)
     builder = RoadGraphBuilder([loop])
 
     assert builder.edge_index.shape == (2, 0)
@@ -118,19 +112,19 @@ def test_loop_segment_is_not_connected_to_itself():
 
 
 def test_zero_length_segment_has_finite_features():
-    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, A], highway="road")])
+    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, A], label=None)])
     assert torch.isfinite(builder.x).all()
 
 
 def test_straight_segment_has_curvature_in_range():
-    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, B, C], highway="road")])
+    builder = RoadGraphBuilder([Segment(edge_ids=[1], u=1, v=2, points=[A, B, C], label=None)])
     assert 0.0 <= builder.x[0, 1].item() <= 1.0
 
 
 def test_duplicate_edge_id_raises():
     duplicates = [
-        Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="road"),
-        Segment(edge_ids=[1], u=2, v=3, points=[B, C], highway="road"),
+        Segment(edge_ids=[1], u=1, v=2, points=[A, B], label=None),
+        Segment(edge_ids=[1], u=2, v=3, points=[B, C], label=None),
     ]
     with pytest.raises(AssertionError, match="Edge ID 1"):
         RoadGraphBuilder(duplicates)
@@ -228,18 +222,21 @@ def test_standardize_features_uses_stats_from_training_segments_only(segments):
     builder = RoadGraphBuilder(segments)
     train_mask = torch.tensor([True, False, True, False])
     stats = fit_standardizer([segments[0], segments[2]], [DEGREES[0], DEGREES[2]])
+    traffic_stats = fit_traffic_standardizer([segments[0], segments[2]])
 
     builder.standardize_features(segments, train_mask)
 
     # Every segment is scaled, also the ones outside the training set
-    expected = [compute_features(segment, degree, *stats) for segment, degree in zip(segments, DEGREES)]
+    expected = []
+    for segment, degree in zip(segments, DEGREES):
+        expected.append(compute_features(segment, degree, *stats) + compute_traffic_features(segment, traffic_stats))
     assert torch.equal(builder.x, torch.tensor(expected, dtype=torch.float))
 
 
 def test_standardize_features_is_not_affected_by_non_training_segments(segments):
     train_mask = torch.tensor([True, True, True, False])
     changed = list(segments)
-    changed[3] = Segment(edge_ids=[30], u=5, v=6, points=[D, (10.5, 54.5)], highway=None, oneway=None)
+    changed[3] = Segment(edge_ids=[30], u=5, v=6, points=[D, (10.5, 54.5)], label=None, oneway=None)
     builder, changed_builder = RoadGraphBuilder(segments), RoadGraphBuilder(changed)
 
     builder.standardize_features(segments, train_mask)
@@ -277,30 +274,12 @@ def test_standardize_features_twice_gives_the_same_result(segments):
     assert torch.equal(once, builder.x)
 
 
-@pytest.mark.parametrize("link,parent", LINK_ROAD_MAPPINGS.items())
-def test_link_road_gets_the_label_of_its_parent(link, parent):
-    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway=link)
+# Which road types become which label is decided in the database (src/db/create_road_type_labels.py,
+# tested in tests/db/unit). The graph builder only turns the label name into a number.
 
-    builder = RoadGraphBuilder([seg])
-
-    assert builder.y.tolist() == [ROAD_CLASSES.index(parent)]
-    assert builder.mask.tolist() == [True]
-
-
-@pytest.mark.parametrize("road_type", RARE_ROAD_TYPES)
-def test_rare_road_type_is_removed_from_training(road_type):
-    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway=road_type)
-
-    builder = RoadGraphBuilder([seg])
-
-    assert builder.y.tolist() == [-1]
-    assert builder.mask.tolist() == [False]
-
-
-@pytest.mark.parametrize("road_type", [road_type for road_type in ROAD_CLASSES
-                                       if road_type not in RARE_ROAD_TYPES and road_type not in LINK_ROAD_MAPPINGS])
-def test_regular_road_type_keeps_its_own_label(road_type):
-    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway=road_type)
+@pytest.mark.parametrize("road_type", ROAD_CLASSES)
+def test_label_is_the_index_in_road_classes(road_type):
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], label=road_type)
 
     builder = RoadGraphBuilder([seg])
 
@@ -308,10 +287,19 @@ def test_regular_road_type_keeps_its_own_label(road_type):
     assert builder.mask.tolist() == [True]
 
 
-def test_rare_road_segment_stays_in_the_graph_as_a_neighbour():
+def test_label_not_in_classes_is_unlabelled():
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], label="primary")
+
+    builder = RoadGraphBuilder([seg], classes=["residential"])
+
+    assert builder.y.tolist() == [-1]
+    assert builder.mask.tolist() == [False]
+
+
+def test_unlabelled_segment_stays_in_the_graph_as_a_neighbour():
     segs = [
-        Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="primary"),
-        Segment(edge_ids=[2], u=2, v=3, points=[B, C], highway="service"),
+        Segment(edge_ids=[1], u=1, v=2, points=[A, B], label="primary"),
+        Segment(edge_ids=[2], u=2, v=3, points=[B, C], label=None),
     ]
 
     builder = RoadGraphBuilder(segs)
@@ -321,21 +309,110 @@ def test_rare_road_segment_stays_in_the_graph_as_a_neighbour():
     assert builder.mask.tolist() == [True, False]
 
 
-def test_link_road_is_unlabelled_when_its_parent_is_not_in_classes():
-    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], highway="primary_link")
+# Traffic features
 
-    builder = RoadGraphBuilder([seg], classes=["primary_link", "residential"])
+def test_segment_without_traffic_has_zero_traffic_features():
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B])
 
-    assert builder.y.tolist() == [-1]
-    assert builder.mask.tolist() == [False]
-
-
-def test_link_parents_are_kept_classes():
-    for parent in LINK_ROAD_MAPPINGS.values():
-        assert parent in ROAD_CLASSES
-        assert parent not in RARE_ROAD_TYPES
+    assert compute_raw_traffic_features(seg) == [0.0, 0, 0.0, 0.0, 0.0, 0.0]
 
 
-def test_road_classes_have_no_link_or_rare_types():
-    assert not set(ROAD_CLASSES) & set(LINK_ROAD_MAPPINGS)
-    assert not set(ROAD_CLASSES) & set(RARE_ROAD_TYPES)
+def test_raw_traffic_features():
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], traversal_count=9, avg_speed=12.5, avg_acceleration=-0.5,
+                  speed_std=3.0, slow_share=0.25)
+
+    assert compute_raw_traffic_features(seg) == [pytest.approx(math.log(10)), 1, 12.5, -0.5, 3.0, 0.25]
+
+
+def test_traffic_features_are_columns_4_to_9(segments):
+    segments[0].traversal_count = 3
+    segments[0].avg_speed = 10.0
+    segments[0].avg_acceleration = 0.5
+    segments[0].speed_std = 2.0
+    segments[0].slow_share = 0.25
+
+    builder = RoadGraphBuilder(segments)
+
+    assert builder.x[0, 4:].tolist() == pytest.approx([math.log(4), 1.0, 10.0, 0.5, 2.0, 0.25])
+    assert builder.x[1, 4:].tolist() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def test_traffic_standardizer_only_uses_known_speeds():
+    segs = [
+        Segment(edge_ids=[1], u=1, v=2, points=[A, B], traversal_count=1, avg_speed=10.0),
+        Segment(edge_ids=[2], u=2, v=3, points=[B, C], traversal_count=1, avg_speed=20.0),
+        Segment(edge_ids=[3], u=3, v=4, points=[A, C]),
+    ]
+
+    stats = fit_traffic_standardizer(segs)
+    count_mean, count_std = stats[0]
+    speed_mean, speed_std = stats[1]
+    acc_mean, acc_std = stats[2]
+
+    # the segment without traffic does not pull the speed mean down
+    assert (speed_mean, speed_std) == pytest.approx((15.0, 5.0))
+    # no segment has an acceleration, so nothing is changed
+    assert (acc_mean, acc_std) == (0.0, 1.0)
+    # but the count uses all three segments
+    assert count_mean == pytest.approx(2 * math.log(2) / 3)
+
+
+def test_missing_speed_gets_z_zero_and_has_traffic_stays_binary():
+    known = Segment(edge_ids=[1], u=1, v=2, points=[A, B], traversal_count=4, avg_speed=20.0, avg_acceleration=1.0,
+                    speed_std=3.0, slow_share=0.5)
+    missing = Segment(edge_ids=[2], u=2, v=3, points=[B, C])
+    # (mean, std) for count, speed, acceleration, speed_std and slow_share
+    stats = [(0.0, 1.0), (10.0, 5.0), (0.0, 2.0), (1.0, 1.0), (0.25, 0.25)]
+
+    assert compute_traffic_features(known, stats) == pytest.approx([math.log(5), 1, 2.0, 0.5, 2.0, 1.0])
+    assert compute_traffic_features(missing, stats) == [0.0, 0, 0.0, 0.0, 0.0, 0.0]
+
+
+# Neighbour label features
+
+def test_neighbour_labels_are_shares_of_training_neighbours(segments):
+    # segments 0 and 1 are primary, 2 is residential, 3 has no label (see the fixture)
+    builder = RoadGraphBuilder(segments)
+    train_mask = torch.tensor([True, True, True, False])
+
+    builder.add_neighbour_label_features(train_mask)
+
+    primary, residential = ROAD_CLASSES.index("primary"), ROAD_CLASSES.index("residential")
+    shares = builder.x[:, 10:]
+    assert shares.shape == (4, len(ROAD_CLASSES))
+    # segment 2 has neighbours 0, 1 (primary) and 3 (no training label): 2 of 3 are primary
+    assert shares[2, primary].item() == pytest.approx(2 / 3)
+    assert shares[2].sum().item() == pytest.approx(2 / 3)
+    # segment 3 only has neighbour 2, which is residential
+    assert shares[3, residential].item() == 1.0
+
+
+def test_neighbour_labels_only_use_training_segments(segments):
+    builder = RoadGraphBuilder(segments)
+    # segment 2 (residential) is not a training segment, so segment 3 must not see its label
+    train_mask = torch.tensor([True, True, False, False])
+
+    builder.add_neighbour_label_features(train_mask)
+
+    assert builder.x[3, 10:].tolist() == [0.0] * len(ROAD_CLASSES)
+
+
+def test_neighbour_labels_never_use_the_own_label():
+    # one training segment without neighbours: its own label must not show up
+    seg = Segment(edge_ids=[1], u=1, v=2, points=[A, B], label="primary")
+    builder = RoadGraphBuilder([seg])
+
+    builder.add_neighbour_label_features(torch.tensor([True]))
+
+    assert builder.x[0, 10:].tolist() == [0.0] * len(ROAD_CLASSES)
+
+
+def test_neighbour_labels_keep_the_other_features(segments):
+    builder = RoadGraphBuilder(segments)
+    train_mask = torch.tensor([True, True, True, False])
+    builder.standardize_features(segments, train_mask)
+    before = builder.x.clone()
+
+    builder.add_neighbour_label_features(train_mask)
+
+    assert torch.equal(builder.x[:, :10], before)

@@ -8,7 +8,7 @@ import torch
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_recall_fscore_support
 
 # The coarse road categories used for grouped evaluation (report Table 13), following the OSM road hierarchy.
-# Link types are not listed: the graph builder merges them into their parent type (LINK_ROAD_MAPPINGS).
+# Link types are not listed: they are merged into their parent type when the labels are made (src/db/create_road_type_labels.py).
 # Road types that are in no category are left out of grouped evaluation.
 ROAD_GROUPS = {
     "highways": ["motorway", "trunk"],

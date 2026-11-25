@@ -35,6 +35,10 @@ jobs:
           pytest tests/db/unit -v --cov=src/db --cov-report=term
 
       - name: Run ML tests
+        # the ML code imports the database engine (database_loader.py), which needs a DATABASE_URL.
+        # The tests never connect to it.
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
         run: |
           pytest tests/ml/ -v --cov=src/ml --cov-report=term
 

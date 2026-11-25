@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from src.ml import config
 from src.ml.class_weights import compute_class_weights
-from src.ml.data.file_loader import ShapefileMapLoader
+from src.ml.data.database_loader import load_segments
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split_graph import make_split_masks
 from src.ml.evaluation import evaluate, labels_in_data
@@ -24,9 +24,9 @@ def prepare_data():
     # The MLP does not use the connections between segments, but the graph builder is still used, so the MLP gets
     # exactly the same features, labels and split as GraphSAGE and the other models.
 
-    # Load the Beijing road network and build the line graph (one vertex per road segment)
-    loader = ShapefileMapLoader(config.DATA_DIR)
-    segments = loader.get_segments()
+    # Load the Beijing road network and the labels from the database, and build the line graph
+    # (one vertex per road segment)
+    segments = load_segments()
 
     builder = RoadGraphBuilder(segments)
     graph = builder.get_static_components()
@@ -43,6 +43,11 @@ def prepare_data():
 
     # Standardise the features, with the mean and standard deviation of the training segments only
     builder.standardize_features(segments, train_mask)
+
+    # Add the share of each road type among the neighbours (training labels only). x gets new columns,
+    # so the graph dictionary needs the new x
+    builder.add_neighbour_label_features(train_mask)
+    graph["x"] = builder.x
 
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Counted from the
     # training segments only. The same shared function as GraphSAGE, so both are trained with the same weights.

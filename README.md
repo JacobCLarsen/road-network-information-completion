@@ -120,7 +120,7 @@ See [src/api/README.md](src/api/README.md) for detailed setup instructions and
 ```bash
 pip install -r requirements-ml.txt
 
-# Train and evaluate GraphSAGE (needs the map in data/bj_data/map/)
+# Train and evaluate GraphSAGE (needs the database with the map and labels, see "Database" above)
 python -m src.ml.models.graphsage.dev_run_graphsage
 ```
 
