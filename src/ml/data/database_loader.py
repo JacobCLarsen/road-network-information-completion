@@ -182,9 +182,16 @@ def load_segments():
 
 
 async def read_from_database():
+    print("Loading road network and road-type labels from the database...")
     edges = await read_edges()
-    # this one takes a minute or two, because it goes through all the traversals
+    print(f"Loaded {len(edges)} directed road segments.")
+
+    # Aggregate traffic information from all traversals.
+    print("Loading and aggregating trajectory information from the database...")
     traffic = await read_traffic()
+    print(f"Loaded traffic information for {len(traffic)} directed road segments.")
+
     # close the connections, because asyncio.run closes the event loop they belong to
     await engine.dispose()
+
     return edges, traffic
