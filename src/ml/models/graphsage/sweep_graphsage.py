@@ -4,7 +4,7 @@
 # validation set. Use this while tuning, instead of changing graphsage_config.py by hand between runs.
 # Like the development run, it only scores on the VALIDATION set. The test set is never used here.
 #
-# How it searches: trying every combination of every setting would take far too long (2 * 3 * 3 * 2 = 36
+# How it searches: trying every combination of every setting would take far too long (3 * 3 * 3 * 3 = 81
 # combinations, each trained with every seed for config.EPOCHS epochs). Instead it tunes one setting at a time, in the
 # order of SWEEP: it tries every value of the first setting, keeps the best one, then tries every value of the next
 # setting with that best value in place, and so on. The settings affect each other, so after the last setting it
@@ -29,11 +29,14 @@ from src.ml.models.graphsage.train_graphsage import prepare_data, train_graphsag
 # their value from graphsage_config.py.
 # Learning rate goes first, because it decides how far the model gets in config.EPOCHS epochs and so changes what the
 # other settings look like. CLASS_WEIGHT_POWER is not here: it is in src/ml/config.py and shared with the other models.
+# 0.001 and 512 were added for the sweep of 26 Nov 2026 (see graphsage_config.py): group hiding makes GROUPS weight
+# updates per epoch instead of 1, so a lower learning rate might have been better, and 256 was the largest hidden size
+# tried before.
 SWEEP = {
-    "LEARNING_RATE": [0.005, 0.01],
+    "LEARNING_RATE": [0.001, 0.005, 0.01],
     "WEIGHT_DECAY": [0, 5e-4, 5e-3],
     "DROPOUT": [0.2, 0.4, 0.6],
-    "WORKING_SPACE": [128, 256],
+    "WORKING_SPACE": [128, 256, 512],
 }
 
 # The most rounds to run. A round tries every value of every setting once. 2 would check that the best value of the
