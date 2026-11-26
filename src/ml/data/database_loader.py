@@ -178,7 +178,12 @@ def add_traffic(segment, traffic):
 def load_segments():
     # The training scripts are not async, so this function runs the async database code for them
     edges, traffic = asyncio.run(read_from_database())
-    return edges_to_segments(edges, traffic)
+
+    print("Constructing road segments and combining traffic information...")
+    segments = edges_to_segments(edges, traffic)
+    print(f"Constructed {len(segments)} road segments.")
+
+    return segments
 
 
 async def read_from_database():
