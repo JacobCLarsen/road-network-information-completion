@@ -125,7 +125,7 @@ pip install --force-reinstall torch --index-url https://download.pytorch.org/whl
 python -c "import torch; print(torch.cuda.is_available())"   # should print True
 ```
 
-Set `ML_DEVICE` to choose the device yourself, e.g. `ML_DEVICE=cpu` to compare against the CPU or `ML_DEVICE=cuda:1` for a second GPU. The tests always run on the CPU.
+Set `ML_DEVICE` to choose the device yourself, e.g. `"ML_DEVICE","cpu"` or `"ML_DEVICE","cuda"` for GPU. The tests always run on the CPU.
 
 GPU results can differ slightly between runs with the same seed, because some GPU operations (adding up neighbour features) do not always add in the same order. Use the CPU when you need results that match exactly.
 
