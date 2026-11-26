@@ -14,6 +14,10 @@ from src.ml.evaluation import labels_in_data
 from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.train_mlp import train_mlp
 
+# The tiny test network is missing some road types, so evaluate() warns about it. That warning is tested in
+# tests/ml/test_evaluation.py, so it is hidden here.
+pytestmark = pytest.mark.filterwarnings("ignore:No segments of road type:UserWarning")
+
 """Create a small road network with known features, labels, and data partitions."""
 @pytest.fixture
 def small_road_network():
