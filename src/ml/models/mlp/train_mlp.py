@@ -50,6 +50,10 @@ def prepare_data():
     builder.add_neighbour_label_features(train_mask)
     graph["x"] = builder.x
 
+    print(f"Number of input features: {graph['x'].shape[1]}")
+    print(f"Road segments with traffic information: {sum(segment.traversal_count > 0 for segment in segments)}")
+    print(f"All feature values are finite: {torch.isfinite(graph['x']).all().item()}")
+
     # Weights for the loss, so mistakes on rare road types cost more than mistakes on common ones. Counted from the
     # training segments only. The same shared function as GraphSAGE, so both are trained with the same weights.
     class_weights = compute_class_weights(graph["y"][train_mask], len(ROAD_CLASSES), config.CLASS_WEIGHT_POWER)
@@ -103,8 +107,8 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
         # Clear the gradients from the previous epoch, so every step only uses the gradients of this epoch
         optimizer.zero_grad()
 
-        # Forward: one row of scores per segment, one score per road type. Like GraphSAGE, every segment is passed in
-        # at once (one weight change per epoch), so both models get the same number of training steps.
+        # Forward: one row of scores per segment, one score per road type.
+        # Every segment is passed in at once, with one weight update per epoch.
         out = model(graph["x"])
         # Loss on the training segments only (validation and test labels are never used for learning). The class
         # weights make mistakes on rare road types count more.
@@ -131,8 +135,13 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
             best_epoch = epoch + 1
             best_state = copy.deepcopy(model.state_dict())
 
-        print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
-        print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")
+        # Report training progress every 25 epochs, including the first and final epochs.
+        if epoch == 0 or (epoch + 1) % 25 == 0 or epoch + 1 == config.EPOCHS:
+            print(f"Epoch {epoch + 1}/{config.EPOCHS}: training loss {loss.item():.4f}, validation macro-F1 {val_f1:.4f}")
+            print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")
+        # NOTE: 
+        # We are only changing how frequently progress is printed. The validation macro-F1 is still calculated after every epoch, 
+        # and the best model is still selected from all epochs.
 
     # Go back to the weights from the best epoch, so the predictions come from the best model and not the last one
     model.load_state_dict(best_state)
