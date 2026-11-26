@@ -2,10 +2,8 @@
 
 """Compare MLP hyperparameters using validation results across multiple model seeds."""
 
-# Imports
-import contextlib
+"""Imports"""
 import csv
-import io
 import itertools
 from pathlib import Path
 from src.ml import config
@@ -16,7 +14,7 @@ from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.train_mlp import prepare_data, train_mlp
 
 # Choose which experiment to run: hidden_size, dropout, learning_rate, or class_weight_power.
-SWEEP_NAME = "class_weight_power"
+SWEEP_NAME = "hidden_size"
 
 # Each experiment changes one hyperparameter while keeping the others fixed.
 # Update the fixed values using the results from the preceding experiments.
@@ -25,21 +23,21 @@ SWEEPS = {
         "WORKING_SPACE": [32, 64, 128, 256],
         "DROPOUT": [0.5],
         "LEARNING_RATE": [0.01],
-        "CLASS_WEIGHT_POWER": [1.0],
+        "CLASS_WEIGHT_POWER": [0.5],
     },
 
     "dropout": {
         "WORKING_SPACE": [256],
         "DROPOUT": [0.0, 0.2, 0.5, 0.7],
         "LEARNING_RATE": [0.01],
-        "CLASS_WEIGHT_POWER": [1.0],
+        "CLASS_WEIGHT_POWER": [0.5],
     },
 
     "learning_rate": {
         "WORKING_SPACE": [256],
         "DROPOUT": [0.5],
         "LEARNING_RATE": [0.001, 0.005, 0.01, 0.02],
-        "CLASS_WEIGHT_POWER": [1.0],
+        "CLASS_WEIGHT_POWER": [0.5],
     },
 
     "class_weight_power": {
@@ -59,6 +57,24 @@ def format_score(score):
     if score["std"] is None:
         return f"{score['mean']:.4f}"
     return f"{score['mean']:.4f} ± {score['std']:.4f}"
+
+"""Save completed configurations, ordered by mean validation macro-F1."""
+def save_results(experiment_rows):
+    # Sort the completed configurations so the best result appears first.
+    sorted_rows = sorted(
+        experiment_rows,
+        key = lambda row: row["macro_f1_mean"],
+        reverse = True,
+    )
+
+    # Create the results directory if it does not exist.
+    RESULTS_FILE.parent.mkdir(parents = True, exist_ok = True)
+
+    # Save all completed configurations to the CSV file.
+    with RESULTS_FILE.open("w", newline = "", encoding = "utf-8") as output:
+        writer = csv.DictWriter(output, fieldnames = sorted_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(sorted_rows)
 
 """Train each configuration, compare validation performance, and save the results."""
 def main():
@@ -89,7 +105,14 @@ def main():
     # Prepare data once so all configurations use the same split and preprocessing.
     # The unused fourth return value (_) is the test mask; tuning never uses it.
     # The initial class weights are also unused, since we calculate them for each configuration.
+    print("Preparing data for the MLP sweep...")
     graph, train_mask, val_mask, _, _, labels = prepare_data()
+
+    print("\nData preparation completed.")
+    print(f"Configurations: {len(configurations)}")
+    print(f"Model seeds: {config.MODEL_SEEDS}")
+    print(f"Epochs per training run: {config.EPOCHS}")
+    print(f"Total training runs: {len(configurations) * len(config.MODEL_SEEDS)}")
 
     # getattr() reads settings by their string names, e.g. "WORKING_SPACE".
     # Each setting is read from its corresponding module using setting_modules.
@@ -139,12 +162,9 @@ def main():
             # to measure how much its performance varies between runs.
             for seed in config.MODEL_SEEDS:
                 # train_mlp() creates and trains a new model for the current seed.
-                # StringIO() temporarily captures the training output so that
-                # the terminal only displays our results instead of every epoch.
-                with contextlib.redirect_stdout(io.StringIO()):
-                    predictions, best_epoch = train_mlp(
-                        graph, train_mask, val_mask, class_weights, labels, seed
-                    )
+                predictions, best_epoch = train_mlp(
+                    graph, train_mask, val_mask, class_weights, labels, seed
+                )
 
                 # Evaluate on the validation set only, never on test labels.
                 scores = evaluate(
@@ -194,6 +214,10 @@ def main():
                 "best_epochs": " ".join(map(str, best_epochs)),
             })
 
+            # Save the results after every completed configuration.
+            save_results(experiment_rows)
+            print(f"Results saved to {RESULTS_FILE}")
+
     # The finally block always runs after the try block, even if training fails.
     # This prevents the sweep from leaving temporary hyperparameter values in memory.
     finally:
@@ -224,18 +248,6 @@ def main():
             f"lr={row['learning_rate']}, power={row['class_weight_power']}: "
             f"macro-F1 {macro_f1}; best epochs {row['best_epochs']}"
         )
-
-    # DictWriter uses the dictionary keys as CSV column names and writes one
-    # row per configuration. The directory is created if it does not exist.
-    RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    # Open the CSV file for writing and save all evaluated configurations.
-    # writeheader() writes the column names, while writerows() writes the results.
-    # An existing file with the same name will be overwritten.
-    with RESULTS_FILE.open("w", newline="", encoding="utf-8") as output:
-        writer = csv.DictWriter(output, fieldnames=experiment_rows[0].keys())
-        writer.writeheader()
-        writer.writerows(experiment_rows)
 
     # Confirm where the results were saved so they can be found later.
     print(f"\nSaved results to {RESULTS_FILE}")
