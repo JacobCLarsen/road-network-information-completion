@@ -61,10 +61,27 @@ def prepare_data():
     return graph, train_mask, val_mask, test_mask, class_weights, labels
 
 
-def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
+def saved_settings():
+    # The settings saved with every GraphSAGE run in the database (model_run.hyperparameters), so a run can be
+    # trained again with the same settings
+    return {
+        "epochs": config.EPOCHS,
+        "hidden": sage_config.WORKING_SPACE,
+        "dropout": sage_config.DROPOUT,
+        "learning_rate": sage_config.LEARNING_RATE,
+        "weight_decay": sage_config.WEIGHT_DECAY,
+        "groups": sage_config.GROUPS,
+        "validate_every": sage_config.VALIDATE_EVERY,
+        "class_weight_power": config.CLASS_WEIGHT_POWER,
+    }
+
+
+def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed, history=None):
     # Trains one GraphSAGE model with the given seed and returns its predictions for every segment, from the epoch with
     # the best validation macro-F1. Returns predictions, best_epoch.
     # The test set is not passed in, so it can never influence training or the choice of epoch.
+    # If history is a list, one row per epoch is added to it: {"epoch", "train_loss", "val_macro_f1"}. The run scripts
+    # save it in the database as the training curve. val_macro_f1 is None for the epochs that were not validated.
 
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
     road_types = len(ROAD_CLASSES)
@@ -157,6 +174,8 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
         # model on the whole graph a second time. The best epoch is then chosen from the checked epochs only.
         if (epoch + 1) % sage_config.VALIDATE_EVERY != 0 and epoch + 1 != config.EPOCHS:
             print(f"Epoch {epoch + 1}: training loss {loss:.4f}")
+            if history is not None:
+                history.append({"epoch": epoch + 1, "train_loss": loss, "val_macro_f1": None})
             continue
 
         # Check the model on the validation set after this epoch. Evaluation mode turns dropout off, and gradients are
@@ -175,6 +194,9 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed):
             best_f1 = val_f1
             best_epoch = epoch + 1
             best_state = copy.deepcopy(model.state_dict())
+
+        if history is not None:
+            history.append({"epoch": epoch + 1, "train_loss": loss, "val_macro_f1": val_f1})
 
         print(f"Epoch {epoch + 1}: training loss {loss:.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
         print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")

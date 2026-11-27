@@ -59,10 +59,23 @@ def prepare_data():
 
     return graph, train_mask, val_mask, test_mask, class_weights, labels
 
-def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
+def saved_settings():
+    # The settings saved with every MLP run in the database (model_run.hyperparameters), so a run can be trained again
+    # with the same settings
+    return {
+        "epochs": config.EPOCHS,
+        "hidden": mlp_config.WORKING_SPACE,
+        "dropout": mlp_config.DROPOUT,
+        "learning_rate": mlp_config.LEARNING_RATE,
+        "class_weight_power": config.CLASS_WEIGHT_POWER,
+    }
+
+def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed, history=None):
     # Trains one MLP with the given seed and returns its predictions for every segment, from the epoch with the best
     # validation macro-F1. Returns predictions, best_epoch.
     # The test set is not passed in, so it can never influence training or the choice of epoch.
+    # If history is a list, one row per epoch is added to it: {"epoch", "train_loss", "val_macro_f1"}. The run scripts
+    # save it in the database as the training curve.
 
     # Train on the GPU if there is one, otherwise on the CPU (see src/ml/device.py). The model and every tensor it
     # touches must be on the same device, so the graph, the masks and the class weights are moved there too.
@@ -130,6 +143,9 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed):
             best_f1 = val_f1
             best_epoch = epoch + 1
             best_state = copy.deepcopy(model.state_dict())
+
+        if history is not None:
+            history.append({"epoch": epoch + 1, "train_loss": loss.item(), "val_macro_f1": val_f1})
 
         print(f"Epoch {epoch + 1}: training loss {loss.item():.4f}, validation macro-F1 {val_f1:.4f}{' (best so far)' if new_best else ''}")
         print(f"Best epoch so far: {best_epoch} (validation macro-F1 {best_f1:.4f})")

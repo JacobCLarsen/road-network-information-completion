@@ -21,7 +21,7 @@ from src.ml import config
     ],
 )
 def test_run_script_scores_the_correct_partition(
-    monkeypatch, capsys, module_name, evaluation_partition, partition_name,
+    monkeypatch, capsys, fake_database, module_name, evaluation_partition, partition_name,
 ):
     # monkeypatch temporarily replaces functions and settings during the test.
     # capsys captures printed output, while pytest supplies the remaining arguments from the cases above.
@@ -60,7 +60,7 @@ def test_run_script_scores_the_correct_partition(
 
     # Replace the real train_mlp() function with predictable behavior.
     # Instead of training a model, fake_train() checks its inputs and returns perfect predictions.
-    def fake_train(prepared_graph, training, validation, class_weights, used_labels, seed):
+    def fake_train(prepared_graph, training, validation, class_weights, used_labels, seed, history=None):
         # Verify that training receives the correct graph, masks, class weights, and road-type labels.
         # The test mask must never be passed to training or used for selecting the best epoch.
         assert prepared_graph is graph
@@ -115,3 +115,11 @@ def test_run_script_scores_the_correct_partition(
     # capsys.readouterr().out retrieves the text printed during the test.
     # Verify that the summary identifies the correct partition as Validation or Test.
     assert partition_name in capsys.readouterr().out
+
+    # The run is saved in the database (fake_database replaces the real one): the split once, then one MLP run per
+    # seed with the scores of the partition this script evaluates, and nothing failed.
+    assert len(fake_database["splits"]) == 1
+    assert [(started[0], started[1]) for started in fake_database["started"]] == [("MLP", 0), ("MLP", 1)]
+    partition = "val" if evaluation_partition == "validation" else "test"
+    assert [list(finished[1]) for finished in fake_database["finished"]] == [[partition], [partition]]
+    assert fake_database["failed"] == []
