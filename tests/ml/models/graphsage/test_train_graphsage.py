@@ -414,3 +414,21 @@ def test_predictions_come_from_the_best_epoch(small_road_network, monkeypatch):
     assert torch.equal(after_training, first_epoch)
     assert not torch.equal(after_training, last_epoch)
     assert torch.equal(predictions, after_training.argmax(dim=1))
+
+
+# Checks that the training curve gets one row per epoch, with the loss of every epoch and the validation macro-F1 of
+# the validated epochs only. The run scripts save it in the database, so a missing or wrong row would give a wrong
+# curve in the API.
+def test_history_has_one_row_per_epoch(small_road_network, few_epochs, training_spies, monkeypatch):
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+    monkeypatch.setattr(sage_config, "VALIDATE_EVERY", 2)
+
+    history = []
+    train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed=0, history=history)
+
+    assert [row["epoch"] for row in history] == [1, 2, 3, 4, 5]
+    # Validated after epochs 2 and 4, and after the last epoch (5)
+    assert [row["val_macro_f1"] for row in history] == [None, training_spies["val_f1s"][0], None,
+                                                        training_spies["val_f1s"][1], training_spies["val_f1s"][2]]
+    # The loss is a plain number (the average over the groups), so it can be saved in the database
+    assert all(isinstance(row["train_loss"], float) for row in history)

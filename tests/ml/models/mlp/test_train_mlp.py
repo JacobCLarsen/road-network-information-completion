@@ -358,3 +358,17 @@ def test_training_uses_current_mlp_settings(small_road_network, monkeypatch):
 
     # Verify that Adam received the configured learning rate.
     assert optimizer_settings == [0.003]
+
+
+"""Check that the training curve gets one row per epoch."""
+def test_history_has_one_row_per_epoch(small_road_network, few_epochs, training_spies):
+    # The run scripts save the history in the database as the training curve of the run.
+    graph, train_mask, val_mask, class_weights, labels = small_road_network
+
+    history = []
+    train_mlp(graph, train_mask, val_mask, class_weights, labels, seed=0, history=history)
+
+    # One row per epoch, with the validation macro-F1 of that epoch and the loss as a plain number
+    assert [row["epoch"] for row in history] == [1, 2, 3, 4, 5]
+    assert [row["val_macro_f1"] for row in history] == training_spies["val_f1s"]
+    assert all(isinstance(row["train_loss"], float) for row in history)
