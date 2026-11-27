@@ -91,8 +91,10 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
+        # requirements-ml.txt (which includes requirements.txt), because tests/db/integration/test_save_run.py tests
+        # saving the model runs, and the ML code needs torch
         run: |
-          pip install --no-cache-dir -r requirements.txt psycopg2-binary
+          pip install --no-cache-dir -r requirements-ml.txt psycopg2-binary
 
       - name: Apply migrations
         env:
