@@ -114,6 +114,21 @@ python -m src.ml.models.majority.run_majority
 
 It has no randomness and nothing to tune, so it runs once and is scored on both the validation and the test set. Every model should clearly beat its macro-F1.
 
+## Training on the GPU
+
+GraphSAGE and the MLP train on an NVIDIA GPU when PyTorch can see one, and fall back to the CPU otherwise (`src/ml/device.py`). Each run prints the device it uses, e.g. `Training GraphSAGE with seed 0 on cuda (NVIDIA GeForce RTX 4060)`.
+
+`pip install torch` gives a CPU-only build on Windows, so to use the GPU, replace it with a CUDA build (pick the CUDA version for your driver at https://pytorch.org/get-started/locally/):
+
+```bash
+pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128
+python -c "import torch; print(torch.cuda.is_available())"   # should print True
+```
+
+Set `ML_DEVICE` to choose the device yourself, e.g. `"ML_DEVICE","cpu"` or `"ML_DEVICE","cuda"` for GPU. The tests always run on the CPU.
+
+GPU results can differ slightly between runs with the same seed, because some GPU operations (adding up neighbour features) do not always add in the same order. Use the CPU when you need results that match exactly.
+
 ## Configuration
 
 - `src/ml/config.py` holds the settings that must be the same for every model (data path, train/validation share, split strategy and seed, number of epochs), so results can be compared fairly.

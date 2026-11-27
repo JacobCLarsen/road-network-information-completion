@@ -12,6 +12,7 @@ from src.ml.class_weights import compute_class_weights
 from src.ml.data.database_loader import load_segments
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES
 from src.ml.data.split_graph import make_split_masks
+from src.ml.device import describe_device, get_device, graph_to_device
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.mlp import mlp_config
 from src.ml.models.mlp.mlp_model import MLP
@@ -76,6 +77,14 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed, history=
     # If history is a list, one row per epoch is added to it: {"epoch", "train_loss", "val_macro_f1"}. The run scripts
     # save it in the database as the training curve.
 
+    # Train on the GPU if there is one, otherwise on the CPU (see src/ml/device.py). The model and every tensor it
+    # touches must be on the same device, so the graph, the masks and the class weights are moved there too.
+    device = get_device()
+    graph = graph_to_device(graph, device)
+    train_mask = train_mask.to(device)
+    val_mask = val_mask.to(device)
+    class_weights = class_weights.to(device)
+
     # The number of features each road segment has, read from the data so it stays correct if features are added.
     road_features = graph["x"].shape[1]
     # The second layer outputs one class score for each road type, read from the class list so they stay in sync.
@@ -86,12 +95,12 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed, history=
     torch.manual_seed(seed)
 
     # Hidden size, dropout and learning rate come from the MLP config (src/ml/models/mlp/mlp_config.py)
-    model = MLP(road_features, mlp_config.WORKING_SPACE, road_types, mlp_config.DROPOUT)
+    model = MLP(road_features, mlp_config.WORKING_SPACE, road_types, mlp_config.DROPOUT).to(device)
     # Adam changes the model's weights to lower the loss
     optimizer = torch.optim.Adam(model.parameters(), lr=mlp_config.LEARNING_RATE)
 
     # Show what is being trained and with which settings
-    print(f"Training MLP with seed {seed}")
+    print(f"Training MLP with seed {seed} on {describe_device(device)}")
     print(f"MLP with {road_features} features, {mlp_config.WORKING_SPACE} hidden units, dropout {mlp_config.DROPOUT}, learning rate {mlp_config.LEARNING_RATE}")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
@@ -149,7 +158,8 @@ def train_mlp(graph, train_mask, val_mask, class_weights, labels, seed, history=
     model.eval()
     with torch.no_grad():
         out = model(graph["x"])
-    # The road type with the highest score is the model's prediction
-    predictions = out.argmax(dim=1)
+    # The road type with the highest score is the model's prediction. Moved back to the CPU, so the callers can index
+    # it with their own (CPU) masks and score it with scikit-learn.
+    predictions = out.argmax(dim=1).cpu()
 
     return predictions, best_epoch

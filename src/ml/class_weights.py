@@ -27,7 +27,7 @@ def compute_class_weights(train_labels, num_classes, power=1.0):
 
     # Road types absent from training keep a weight of zero. The mask
     # 'present' prevents dividing by zero for those missing road types.
-    class_weights = torch.zeros(num_classes)
+    class_weights = torch.zeros(num_classes, device=train_labels.device)
     present = counts > 0
 
     # The original inverse-frequency formula gives larger weights to
