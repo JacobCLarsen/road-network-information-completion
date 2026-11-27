@@ -30,3 +30,8 @@ EPOCHS = 500
 # inverse-frequency weights, 0.5 their square root, 0 no weighting. With 1, GraphSAGE predicted rare types far too
 # often (e.g. many residential segments as living_street); 0.5 raised its validation macro-F1 from 0.370 to 0.402.
 CLASS_WEIGHT_POWER = 0.5
+
+# Save every run of the GraphSAGE and MLP run scripts (dev_run_* and final_testrun_*) in the database: the settings,
+# the training curve, the scores and the predictions (see src/ml/save_run.py). Set it to False to train without a
+# database.
+SAVE_RUNS = True
