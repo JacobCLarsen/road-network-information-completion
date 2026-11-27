@@ -269,7 +269,8 @@ def neighbour_label_shares(edge_index, y, known_mask, num_classes):
 
     # index_add_ adds every one-hot row to the row of the segment it points to (the target), so counts[i][c] is
     # how many known neighbours of segment i have road type c
-    counts = torch.zeros(num_segments, num_classes)
+    # Made on the same device as y, so this also works when the graph is on the GPU
+    counts = torch.zeros(num_segments, num_classes, device=y.device)
     counts.index_add_(0, known_targets, one_hot)
 
     # Divide by the number of neighbours (all of them, also the unknown ones). bincount counts how many

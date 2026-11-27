@@ -13,6 +13,7 @@ from src.ml.class_weights import compute_class_weights
 from src.ml.data.database_loader import load_segments
 from src.ml.data.road_graph_builder import RoadGraphBuilder, ROAD_CLASSES, neighbour_label_shares
 from src.ml.data.split_graph import make_split_masks
+from src.ml.device import describe_device, get_device, graph_to_device
 from src.ml.evaluation import evaluate, labels_in_data
 from src.ml.models.graphsage import graphsage_config as sage_config
 from src.ml.models.graphsage.graphsage_model import GraphSAGE
@@ -89,6 +90,16 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed, hi
     if sage_config.GROUPS < 2:
         raise ValueError("GROUPS in graphsage_config.py must be at least 2")
 
+    # Train on the GPU if there is one, otherwise on the CPU (see src/ml/device.py). The model and every tensor it
+    # touches must be on the same device, so the graph, the masks and the class weights are moved there too.
+    # The training segment numbers stay on the CPU, because the group shuffling below uses a CPU random generator.
+    device = get_device()
+    train_indices = train_mask.nonzero().view(-1)
+    graph = graph_to_device(graph, device)
+    train_mask = train_mask.to(device)
+    val_mask = val_mask.to(device)
+    class_weights = class_weights.to(device)
+
     # The input is the normal features plus one column per road type: the share of the neighbours that are training
     # segments of that road type (see neighbour_label_shares). For validation and the predictions we use ALL the
     # training labels, which is the real situation: every known label is used to predict the missing ones.
@@ -104,17 +115,16 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed, hi
     # The random groups for group hiding. A separate generator with the same seed, so the groups are the same every
     # time we train with this seed.
     generator = torch.Generator().manual_seed(seed)
-    train_indices = train_mask.nonzero().view(-1)
 
     # Hidden size, dropout, learning rate and weight decay come from the GraphSAGE config
     # (src/ml/models/graphsage/graphsage_config.py)
-    model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT)
+    model = GraphSAGE(road_features, sage_config.WORKING_SPACE, road_types, sage_config.DROPOUT).to(device)
     # Adam changes the model's weights to lower the loss
     optimizer = torch.optim.Adam(model.parameters(), lr=sage_config.LEARNING_RATE,
                                  weight_decay=sage_config.WEIGHT_DECAY)
 
     # Show what is being trained and with which settings
-    print(f"Training GraphSAGE with seed {seed}")
+    print(f"Training GraphSAGE with seed {seed} on {describe_device(device)}")
     print(f"GraphSAGE with {road_features} features, {sage_config.WORKING_SPACE} hidden units, dropout {sage_config.DROPOUT}, learning rate {sage_config.LEARNING_RATE}, weight decay {sage_config.WEIGHT_DECAY}, {sage_config.GROUPS} groups")
 
     # The best validation macro-F1 so far, the epoch it came from and a copy of the model's weights at that epoch.
@@ -130,7 +140,7 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed, hi
         # Group hiding: shuffle the training segments and split them into GROUPS groups of (almost) the same size.
         # randperm gives the numbers 0 .. n-1 in a random order, and chunk cuts the list into GROUPS pieces.
         shuffled = train_indices[torch.randperm(len(train_indices), generator=generator)]
-        groups = shuffled.chunk(sage_config.GROUPS)
+        groups = [group.to(device) for group in shuffled.chunk(sage_config.GROUPS)]
 
         loss_sum = 0.0
         for group in groups:
@@ -202,7 +212,8 @@ def train_graphsage(graph, train_mask, val_mask, class_weights, labels, seed, hi
     model.eval()
     with torch.no_grad():
         out = model(full_x, graph["edge_index"])
-    # The road type with the highest score is the model's prediction
-    predictions = out.argmax(dim=1)
+    # The road type with the highest score is the model's prediction. Moved back to the CPU, so the callers can index
+    # it with their own (CPU) masks and score it with scikit-learn.
+    predictions = out.argmax(dim=1).cpu()
 
     return predictions, best_epoch
